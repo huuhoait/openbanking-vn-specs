@@ -22,7 +22,6 @@ graph TB
     subgraph "Security Layer"
         IAM[Identity & Access Management<br/>OAuth 2.0 / OIDC]
         Consent[Consent Management Service]
-        HSM[Hardware Security Module]
     end
     
     subgraph "Service Layer"
@@ -53,7 +52,8 @@ graph TB
     end
     
     subgraph "Management Layer"
-        DevPortal[Developer Portal]
+        DevPortal[Developer Portal<br/>- API Documentation<br/>- Sandbox Environment<br/>- App Management]
+        TPPMgmt[TPP Management<br/>- Onboarding & Vetting<br/>- Certificate Management<br/>- Compliance Monitoring]
         AdminPortal[Admin Portal]
         Monitor[Monitoring & Analytics]
     end
@@ -71,7 +71,6 @@ graph TB
     APIGW --> Recon
     
     IAM --> Consent
-    IAM --> HSM
     
     AIS --> ESB
     PIS --> ESB
@@ -94,8 +93,13 @@ graph TB
     APIGW --> Cache
     APIGW --> LogDB
     
+    TPP -.-> DevPortal
+    TPP -.-> TPPMgmt
     DevPortal -.-> APIGW
+    TPPMgmt -.-> IAM
+    TPPMgmt -.-> DB
     AdminPortal -.-> Monitor
+    AdminPortal -.-> TPPMgmt
     Monitor -.-> APIGW
 ```
 
@@ -112,7 +116,6 @@ graph TB
 ### 2. Security Layer
 - **IAM Server**: Quản lý OAuth 2.0/OIDC flows
 - **Consent Management**: Lưu trữ và quản lý sự đồng ý của khách hàng
-- **HSM**: Bảo vệ các private keys và sensitive data
 
 ### 3. Service Layer
 - **AIS**: Dịch vụ thông tin tài khoản
@@ -129,6 +132,19 @@ graph TB
 - **Transaction DB**: PostgreSQL/Oracle cho dữ liệu giao dịch
 - **Cache**: Redis cho performance optimization
 - **Log DB**: Elasticsearch cho audit logs
+
+### 6. Management Layer
+- **Developer Portal**:
+  - Cung cấp tài liệu API (API Documentation) và SDKs
+  - Môi trường Sandbox để TPP thử nghiệm tích hợp
+  - Quản lý ứng dụng (Application Management) và cung cấp Client ID/Secret
+  - Support ticket system cho developer
+- **TPP Management**:
+  - Quy trình đăng ký và phê duyệt (Onboarding & Vetting) đối tác TPP
+  - Quản lý vòng đời và trạng thái hoạt động của TPP
+  - Quản lý chứng chỉ số (Digital Certificates) và xác thực eIDAS (nếu có)
+  - Giám sát tuân thủ (Compliance Monitoring) và báo cáo định kỳ
+  - Dispute management và xử lý khiếu nại
 
 ## Sơ Đồ Luồng Dữ Liệu
 
