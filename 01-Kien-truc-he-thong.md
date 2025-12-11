@@ -87,17 +87,14 @@ graph TB
     Recon --> DB
     
     APIGW -.-> Monitor
-    APIGW -.-> Audit
-    Service -.-> Audit
+ 
+ 
     
     TPP -.-> DevPortal
     TPP -.-> TPPMgmt
     DevPortal -.-> APIGW
     TPPMgmt -.-> IAM
     TPPMgmt -.-> DB
-    AdminPortal -.-> Monitor
-    AdminPortal -.-> TPPMgmt
-    AdminPortal -.-> Audit
     Monitor -.-> APIGW
     Audit -.-> DB
 ```
