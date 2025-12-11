@@ -718,6 +718,153 @@ Các mã trạng thái thanh toán tuân thủ ISO 20022:
 |    500    | INTERNAL_ERROR                      | Lỗi hệ thống                  |
 |    504    | GATEWAY_TIMEOUT                     | Timeout kết nối               |
 
+#### **5.2.7. Webhook Phản Hồi Kết Quả Payment (Payment Result Callback)**
+
+Để giảm tải việc polling từ phía TPP và đảm bảo TPP nhận được kết quả giao dịch kịp thời, Ngân hàng hỗ trợ cơ chế **Webhook** để chủ động thông báo kết quả thanh toán về cho TPP.
+
+##### **Đăng Ký Webhook**
+
+| Thuộc tính   | Giá trị                      |
+| :----------- | :--------------------------- |
+| **Endpoint** | `POST /v1/payments/webhooks` |
+| **Method**   | `POST`                       |
+| **Scope**    | `PIS`                        |
+
+**Request Body:**
+
+| Trường      | Loại        | Bắt buộc | Mô tả                                                                         |
+| :---------- | :---------- | :------: | :---------------------------------------------------------------------------- |
+| callbackUrl | String[255] |    M     | URL endpoint của TPP để nhận webhook                                          |
+| events      | Array       |    M     | Danh sách event đăng ký (PAYMENT_COMPLETED, PAYMENT_FAILED, PAYMENT_REVERSED) |
+| secretKey   | String[64]  |    M     | Secret key để ký HMAC-SHA256 payload                                          |
+| isActive    | Boolean     |    O     | Trạng thái active/inactive. Mặc định: true                                    |
+
+**Response Body:**
+
+| Trường    | Loại       | Bắt buộc | Mô tả                  |
+| :-------- | :--------- | :------: | :--------------------- |
+| webhookId | String[36] |    M     | UUID định danh webhook |
+| status    | String     |    M     | "ACTIVE" / "INACTIVE"  |
+| createdAt | DateTime   |    M     | Thời điểm tạo          |
+
+##### **Callback từ Ngân Hàng đến TPP (Payment Result Notification)**
+
+Ngân hàng sẽ gọi đến `callbackUrl` của TPP khi có sự kiện thay đổi trạng thái giao dịch.
+
+| Thuộc tính   | Giá trị             |
+| :----------- | :------------------ |
+| **Endpoint** | `{TPP callbackUrl}` |
+| **Method**   | `POST`              |
+| **Caller**   | Ngân hàng → TPP     |
+
+**Request Headers (Ngân hàng gửi):**
+
+| Header        | Loại   | Bắt buộc | Mô tả                                                            |
+| :------------ | :----- | :------: | :--------------------------------------------------------------- |
+| Content-Type  | String |    M     | "application/json"                                               |
+| X-Webhook-ID  | String |    M     | UUID của webhook đã đăng ký                                      |
+| X-Event-Type  | String |    M     | Loại event (PAYMENT_COMPLETED, PAYMENT_FAILED, PAYMENT_REVERSED) |
+| X-Timestamp   | String |    M     | Thời điểm gửi webhook (RFC 3339)                                 |
+| X-Signature   | String |    M     | HMAC-SHA256(payload, secretKey)                                  |
+| X-Retry-Count | Number |    O     | Số lần retry (0 = lần đầu)                                       |
+
+**Callback Payload (Ngân hàng gửi đến TPP):**
+
+| Trường                    | Loại       | Bắt buộc | Mô tả                                                       |
+| :------------------------ | :--------- | :------: | :---------------------------------------------------------- |
+| eventId                   | String[36] |    M     | UUID định danh event                                        |
+| eventType                 | String     |    M     | "PAYMENT_COMPLETED" / "PAYMENT_FAILED" / "PAYMENT_REVERSED" |
+| eventTime                 | DateTime   |    M     | Thời điểm xảy ra event (RFC 3339)                           |
+| paymentId                 | String[35] |    M     | Mã giao dịch của Ngân hàng                                  |
+| instructionIdentification | String[50] |    M     | Mã giao dịch do TPP khởi tạo (để TPP mapping)               |
+| status                    | String[4]  |    M     | Mã trạng thái ISO 20022 (ACSC, RJCT, CANC, ...)             |
+| statusDateTime            | DateTime   |    M     | Thời điểm cập nhật trạng thái                               |
+| statusReason              | String     |    O     | Lý do (nếu RJCT hoặc CANC)                                  |
+| instructedAmount          | Object     |    M     | Thông tin số tiền giao dịch                                 |
+| instructedAmount.value    | Number     |    M     | Số tiền                                                     |
+| instructedAmount.currency | String[3]  |    M     | Loại tiền (ISO 4217)                                        |
+| bankReference             | String[35] |    O     | Mã tham chiếu nội bộ Ngân hàng                              |
+| napasTraceNumber          | String[12] |    O     | Số trace Napas (nếu là giao dịch Napas)                     |
+
+**Ví dụ Callback Payload:**
+
+```json
+{
+  "eventId": "evt-550e8400-e29b-41d4-a716-446655440000",
+  "eventType": "PAYMENT_COMPLETED",
+  "eventTime": "2025-12-11T13:45:00+07:00",
+  "paymentId": "PAY-123456789012345",
+  "instructionIdentification": "TPP-ORDER-20251211-001",
+  "status": "ACSC",
+  "statusDateTime": "2025-12-11T13:44:58+07:00",
+  "instructedAmount": {
+    "value": 1500000,
+    "currency": "VND"
+  },
+  "bankReference": "BNK-REF-001234",
+  "napasTraceNumber": "123456789012"
+}
+```
+
+**Response từ TPP (Xác nhận nhận webhook):**
+
+TPP phải phản hồi HTTP 200 OK trong vòng **5 giây** để xác nhận đã nhận webhook.
+
+| HTTP Status | Ý nghĩa                            |
+| :---------: | :--------------------------------- |
+|     200     | Đã nhận và xử lý thành công        |
+|     202     | Đã nhận, đang xử lý (acknowledged) |
+|   4xx/5xx   | Lỗi - Ngân hàng sẽ retry           |
+
+##### **Retry Policy**
+
+Nếu TPP không phản hồi 200/202 hoặc timeout, Ngân hàng sẽ retry theo exponential backoff:
+
+| Retry | Thời gian chờ | Ghi chú         |
+| :---: | :------------ | :-------------- |
+|   1   | 30 giây       | Retry lần 1     |
+|   2   | 2 phút        | Retry lần 2     |
+|   3   | 10 phút       | Retry lần 3     |
+|   4   | 1 giờ         | Retry lần 4     |
+|   5   | 6 giờ         | Retry cuối cùng |
+
+Sau 5 lần retry thất bại, webhook sẽ được đánh dấu là **FAILED** và TPP cần sử dụng API "Lấy trạng thái giao dịch" để tra cứu.
+
+##### **Xác Thực Webhook (Signature Verification)**
+
+TPP **bắt buộc** phải xác thực chữ ký webhook để đảm bảo request đến từ Ngân hàng:
+
+```
+Signature = HMAC-SHA256(payload_body, secretKey)
+```
+
+**Quy trình xác thực:**
+1. Lấy giá trị `X-Signature` từ header
+2. Tính HMAC-SHA256 của request body với `secretKey` đã đăng ký
+3. So sánh 2 giá trị (constant-time comparison để chống timing attack)
+4. Nếu không khớp → từ chối request
+
+##### **Quản Lý Webhook**
+
+| Endpoint                              | Method | Mô tả                               |
+| :------------------------------------ | :----- | :---------------------------------- |
+| `GET /v1/payments/webhooks`           | GET    | Danh sách webhook đã đăng ký        |
+| `GET /v1/payments/webhooks/{id}`      | GET    | Chi tiết webhook                    |
+| `PUT /v1/payments/webhooks/{id}`      | PUT    | Cập nhật webhook (URL, events, ...) |
+| `DELETE /v1/payments/webhooks/{id}`   | DELETE | Xóa webhook                         |
+| `GET /v1/payments/webhooks/{id}/logs` | GET    | Lịch sử gọi webhook (debug)         |
+
+##### **Events Hỗ Trợ**
+
+| Event Type         | Mô tả                                               | Trigger                       |
+| :----------------- | :-------------------------------------------------- | :---------------------------- |
+| PAYMENT_COMPLETED  | Giao dịch hoàn thành thành công                     | status = ACSC                 |
+| PAYMENT_FAILED     | Giao dịch thất bại                                  | status = RJCT                 |
+| PAYMENT_REVERSED   | Giao dịch bị đảo/hoàn tiền                          | Có lệnh hoàn tiền từ hệ thống |
+| PAYMENT_PENDING    | Giao dịch đang chờ xử lý (dùng cho batch payment)   | status = PDNG                 |
+| CONSENT_AUTHORIZED | Khách hàng đã xác nhận thanh toán (luồng Decoupled) | consentStatus = AUTHORISED    |
+| CONSENT_REJECTED   | Khách hàng từ chối thanh toán                       | consentStatus = REJECTED      |
+
 ### **5.3. Nhóm Dịch Vụ Thẻ & Quản Lý Vòng Đời (Card Services)**
 
 #### **5.3.1. Phát hành & Quản lý Thẻ**
