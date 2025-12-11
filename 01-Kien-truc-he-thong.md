@@ -35,14 +35,14 @@ graph TB
     
     subgraph "Integration Layer"
         ESB[Enterprise Service Bus<br/>Core Banking Adapter]
-        MQ[Message Queue]
     end
     
-    subgraph "Core Systems"
+    subgraph "Business Records"
         CoreBank[Core Banking System<br/>T24/Flexcube]
+        CardSystem[Card Management System]
         CIC[Credit Information Center]
         Napas[Napas 24/7]
-        BillAgg[Bill Aggregators]
+        BillingSvc[Billing Service]
     end
     
     subgraph "Data Layer"
@@ -78,10 +78,10 @@ graph TB
     Recon --> ESB
     PIS --> Billing
     
-    ESB --> MQ
-    MQ --> CoreBank
+    ESB --> CoreBank
+    ESB --> CardSystem
     ESB --> Napas
-    ESB --> BillAgg
+    ESB --> BillingSvc
     ESB --> CIC
     
     AIS --> DB
@@ -128,7 +128,6 @@ graph TB
 
 ### 4. Integration Layer
 - **ESB**: Chuyển đổi message format (JSON ↔ ISO 8583/SOAP)
-- **Message Queue**: Đảm bảo reliable messaging
 
 ### 5. Data Layer
 - **Transaction DB**: PostgreSQL/Oracle cho dữ liệu giao dịch và audit logs
