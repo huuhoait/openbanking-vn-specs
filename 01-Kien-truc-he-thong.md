@@ -30,7 +30,6 @@ graph TB
         CardSvc[Card Services]
         eKYC[eKYC Service]
         Recon[Reconciliation Service]
-        Billing[Billing & Metering]
     end
     
     subgraph "Integration Layer"
@@ -76,7 +75,6 @@ graph TB
     CardSvc --> ESB
     eKYC --> ESB
     Recon --> ESB
-    PIS --> Billing
     
     ESB --> CoreBank
     ESB --> CardSystem
@@ -87,7 +85,6 @@ graph TB
     AIS --> DB
     PIS --> DB
     Recon --> DB
-    Billing --> DB
     
     APIGW -.-> Monitor
     APIGW -.-> Audit
