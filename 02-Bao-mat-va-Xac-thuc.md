@@ -2,173 +2,118 @@
 
 ## Tổng Quan
 
-Tài liệu này mô tả chi tiết các cơ chế bảo mật và xác thực của hệ thống Open Banking, tuân thủ nghiêm ngặt **Thông tư 64/2024/TT-NHNN** (Công báo 301+302/2025, hiệu lực từ 01/03/2025) và các tiêu chuẩn quốc tế mới nhất năm 2025.
+Tài liệu này mô tả cơ chế bảo mật và xác thực trong hệ thống Open Banking, tuân thủ Thông tư 64/2024/TT-NHNN và các tiêu chuẩn quốc tế.
 
-### Khung Pháp Lý & Tiêu Chuẩn Áp Dụng
+### Khung Pháp Lý & Tiêu Chuẩn
 
-**Quy định pháp luật Việt Nam:**
-- **Thông tư 64/2024/TT-NHNN**: Quy định về triển khai giao diện lập trình ứng dụng mở (Open API) trong ngành Ngân hàng
-  - Phụ lục 01: Đặc tả kỹ thuật API bắt buộc (INF, AIS, PIS, EWLTS)
-  - Phụ lục 02: Tiêu chuẩn kỹ thuật và bảo mật
-  - Điều 11: Yêu cầu về bảo vệ dữ liệu và quản lý consent
-- **Circular 45/2025/TT-NHNN**: Xác thực sinh trắc học bắt buộc (hiệu lực 05/01/2026)
-- **Circular 50/2024/TT-NHNN**: Strong Customer Authentication (SCA) và Multi-Factor Authentication (MFA)
-- **Quyết định 2345/QĐ-NHNN**: Tiêu chuẩn xác thực sinh trắc học cho giao dịch trực tuyến
-- **Nghị định 13/2023/NĐ-CP**: Bảo vệ dữ liệu cá nhân
+**Quy định Việt Nam:**
+- Thông tư 64/2024/TT-NHNN: Quy định Open API, bảo mật và quản lý consent.
+- Circular 45/2025/TT-NHNN: Xác thực sinh trắc học bắt buộc.
+- Circular 50/2024/TT-NHNN: Strong Customer Authentication (SCA) và Multi-Factor Authentication (MFA).
+- Nghị định 13/2023/NĐ-CP: Bảo vệ dữ liệu cá nhân.
 
-**Tiêu chuẩn quốc tế 2025:**
-- **OAuth 2.1** (Draft): Cải tiến từ OAuth 2.0 với PKCE bắt buộc
-- **FAPI 2.0** (Financial-grade API): Baseline Security Profile
-- **OpenID Connect (OIDC)**: Identity layer trên OAuth 2.0
-- **ISO/IEC 27001:2022**: Information Security Management System
-- **ISO 20022**: Financial Services Messages
-- **PCI DSS 4.0**: Payment Card Industry Data Security Standard
-- **OWASP API Security Top 10 (2023)**: API Security Best Practices
+**Tiêu chuẩn quốc tế:**
+- OAuth 2.1: Cải tiến OAuth 2.0 với PKCE bắt buộc.
+- FAPI 2.0: Bảo mật cấp tài chính.
+- OpenID Connect (OIDC): Xác thực danh tính.
+- ISO/IEC 27001:2022: Quản lý bảo mật thông tin.
+- PCI DSS 4.0: Bảo mật dữ liệu thẻ.
 
 ### Mục Tiêu Bảo Mật
 
-1. **Tuân thủ pháp luật**: Đáp ứng 100% yêu cầu Thông tư 64/2024 và các quy định liên quan
-2. **Bảo vệ dữ liệu**: Đảm bảo tính bảo mật, toàn vẹn và khả dụng của dữ liệu khách hàng
-3. **Non-repudiation**: Chống chối bỏ giao dịch thông qua chữ ký số JWS
-4. **Zero Trust**: Áp dụng kiến trúc "Never trust, always verify"
-5. **Resilience**: Khả năng phục hồi và chống chịu tấn công
+1. Tuân thủ pháp luật đầy đủ.
+2. Bảo vệ dữ liệu khách hàng (tính bảo mật, toàn vẹn, khả dụng).
+3. Ngăn chối bỏ giao dịch bằng chữ ký số JWS.
+4. Áp dụng kiến trúc Zero Trust.
+5. Đảm bảo khả năng phục hồi trước tấn công.
 
-## OAuth 2.1 Authorization Code Flow with PKCE & FAPI 2.0
+## OAuth 2.1 Authorization Code Flow với PKCE & FAPI 2.0
 
 ### Tổng Quan
 
-Hệ thống triển khai **OAuth 2.1** (cải tiến từ OAuth 2.0) kết hợp **FAPI 2.0 Baseline Security Profile** để đảm bảo bảo mật cấp độ tài chính (financial-grade security). Các cải tiến chính:
-
-**OAuth 2.1 Enhancements:**
-- ✅ **PKCE bắt buộc** (RFC 7636) - không còn optional
-- ✅ **Loại bỏ Implicit Grant** - không an toàn
-- ✅ **Loại bỏ Password Grant** - Resource Owner Password Credentials
-- ✅ **Refresh Token Rotation** - bắt buộc
-- ✅ **Ưu tiên asymmetric authentication** - JWT, mTLS
-
-**FAPI 2.0 Security Features:**
-- ✅ **Pushed Authorization Requests (PAR)** - RFC 9126
-- ✅ **Rich Authorization Requests (RAR)** - Fine-grained consent
-- ✅ **JWT-secured Authorization Response Mode (JARM)** - RFC 9101
-- ✅ **Proof-of-Possession (PoP) Tokens** - DPoP (RFC 9449)
-- ✅ **Attacker Model Framework** - Comprehensive threat modeling
+Hệ thống sử dụng OAuth 2.1 kết hợp FAPI 2.0 để bảo mật cấp tài chính. Các cải tiến chính:
+- PKCE bắt buộc.
+- Loại bỏ Implicit Grant và Password Grant.
+- Refresh Token Rotation bắt buộc.
+- Ưu tiên xác thực bất đối xứng (JWT, mTLS).
 
 ### Luồng Xác Thực với PAR (Pushed Authorization Request)
 
 ```mermaid
-%%{init: {'theme':'base', 'themeVariables': {
-  'actorBkg':'#1e293b',
-  'actorBorder':'#3b82f6',
-  'actorTextColor':'#e5e7eb',
-  'actorLineColor':'#60a5fa',
-  'signalColor':'#e5e7eb',
-  'signalTextColor':'#e5e7eb',
-  'labelBoxBkgColor':'#334155',
-  'labelBoxBorderColor':'#475569',
-  'labelTextColor':'#e5e7eb',
-  'loopTextColor':'#e5e7eb',
-  'noteBkgColor':'#1e3a8a',
-  'noteBorderColor':'#3b82f6',
-  'noteTextColor':'#e5e7eb',
-  'activationBkgColor':'#3b82f6',
-  'activationBorderColor':'#60a5fa',
-  'sequenceNumberColor':'#0f172a'
-}}}%%
 sequenceDiagram
-    participant User as End User
-    participant TPP as TPP Application
-    participant App as Bank Mobile App
-    participant AuthServer as Authorization Server<br/>(IAM Server)
-    participant ConsentAPI as Consent Management
-    participant ResourceServer as Resource Server (API)
+    participant User as Người dùng
+    participant TPP as Ứng dụng TPP
+    participant App as App Ngân hàng
+    participant AuthServer as Máy chủ Xác thực
+    participant ConsentAPI as API Quản lý Đồng ý
+    participant ResourceServer as Máy chủ Tài nguyên
     
-    Note over TPP: Bước 1: PAR - Push Authorization Request
-    Note over TPP: Generate code_verifier (random)<br/>code_challenge = SHA256(code_verifier)
+    TPP->>AuthServer: POST /par (Đẩy yêu cầu ủy quyền)
+    AuthServer->>TPP: request_uri (hết hạn 60s)
     
-    TPP->>AuthServer: POST /par<br/>+ client_id + client_secret<br/>+ code_challenge + scope<br/>+ redirect_uri + state
-    AuthServer->>AuthServer: Validate client credentials<br/>Store authorization parameters
-    AuthServer-->>TPP: request_uri (expires in 60s)<br/>+ expires_in
+    TPP->>App: Deeplink với request_uri
+    App->>AuthServer: GET /authorize
+    AuthServer->>User: Màn hình đăng nhập
+    User->>AuthServer: Xác thực (sinh trắc học/OTP)
     
-    Note over TPP,App: Bước 2: User Authorization
+    AuthServer->>ConsentAPI: Tạo yêu cầu đồng ý
+    ConsentAPI->>AuthServer: ID Đồng ý
     
-    TPP->>App: Deeplink/QR Code<br/>+ request_uri
-    App->>AuthServer: GET /authorize?<br/>client_id=xxx&request_uri=yyy
-    AuthServer->>AuthServer: Retrieve stored parameters<br/>from request_uri
-    AuthServer->>User: Show Login Screen
-    User->>AuthServer: Authenticate (Biometric/OTP)
+    AuthServer->>User: Màn hình đồng ý (quyền truy cập, tài khoản, thời hạn tối đa 180 ngày)
     
-    AuthServer->>ConsentAPI: Create Consent Request
-    ConsentAPI-->>AuthServer: Consent ID
-    
-    AuthServer->>User: Show Consent Screen<br/>- TPP info & logo<br/>- Requested scopes<br/>- Account selection<br/>- Duration (max 180 days)
-    
-    alt User Approves
-        User->>AuthServer: Approve + Select Accounts
-        AuthServer->>ConsentAPI: Update Consent Status: AUTHORISED
-        AuthServer->>AuthServer: Generate authorization_code<br/>(one-time use, 180s expiry)
-        AuthServer->>App: Redirect to TPP callback<br/>+ authorization_code + state
-        App->>TPP: Return authorization_code
+    alt Người dùng Đồng ý
+        User->>AuthServer: Đồng ý + Chọn tài khoản
+        AuthServer->>ConsentAPI: Cập nhật trạng thái: ĐÃ ĐỒNG Ý
+        AuthServer->>AuthServer: Tạo authorization_code (hết hạn 180s)
+        AuthServer->>App: Chuyển hướng với authorization_code
+        App->>TPP: Trả về authorization_code
         
-        Note over TPP: Bước 3: Token Exchange
+        TPP->>AuthServer: POST /token (đổi token)
+        AuthServer->>AuthServer: Xác thực code_verifier khớp code_challenge
+        AuthServer->>ConsentAPI: Xác thực đồng ý
+        ConsentAPI->>AuthServer: ĐÃ ĐỒNG Ý + Quyền + Tài khoản
         
-        TPP->>AuthServer: POST /token<br/>+ grant_type=authorization_code<br/>+ code + code_verifier<br/>+ client_id + client_secret<br/>+ redirect_uri
-        AuthServer->>AuthServer: Verify:<br/>- code_verifier matches code_challenge<br/>- client credentials<br/>- authorization_code validity
-        AuthServer->>ConsentAPI: Verify Consent Status
-        ConsentAPI-->>AuthServer: AUTHORISED + Scopes + Accounts
+        AuthServer->>AuthServer: Tạo token: access_token (3600s cho AIS), refresh_token (tối đa 180 ngày), id_token
+        AuthServer->>ConsentAPI: Cập nhật trạng thái: HOẠT ĐỘNG
+        AuthServer->>TPP: access_token + refresh_token + id_token
         
-        AuthServer->>AuthServer: Generate Tokens:<br/>- access_token (3600s for AIS)<br/>- refresh_token (max 180 days)<br/>- id_token (OIDC)
-        AuthServer->>ConsentAPI: Update Status: ACTIVE<br/>+ Token Reference (hashed)
-        AuthServer-->>TPP: access_token + refresh_token<br/>+ id_token + expires_in<br/>+ token_type=DPoP
+        TPP->>TPP: Tạo DPoP Proof JWT
+        TPP->>ResourceServer: Yêu cầu API với DPoP
+        ResourceServer->>AuthServer: Kiểm tra token
+        AuthServer->>ResourceServer: Token hợp lệ + Quyền + Đồng ý
+        ResourceServer->>ConsentAPI: Xác thực đồng ý hoạt động
+        ConsentAPI->>ResourceServer: Đồng ý hợp lệ
+        ResourceServer->>TPP: Phản hồi API
         
-        Note over TPP: Bước 4: API Access with DPoP
+        TPP->>AuthServer: POST /token (làm mới token)
+        AuthServer->>AuthServer: Xác thực refresh_token
+        AuthServer->>ConsentAPI: Xác thực đồng ý còn hoạt động
+        ConsentAPI->>AuthServer: HOẠT ĐỘNG
         
-        TPP->>TPP: Create DPoP Proof JWT:<br/>- Sign with TPP private key<br/>- Include jti, htm, htu, iat
-        TPP->>ResourceServer: API Request<br/>+ Authorization: DPoP {access_token}<br/>+ DPoP: {proof_jwt}
-        ResourceServer->>AuthServer: Introspect Token<br/>+ Validate DPoP binding
-        AuthServer-->>ResourceServer: Token Valid + Scopes + Consent
-        ResourceServer->>ConsentAPI: Verify Consent Active<br/>+ Check Account Access
-        ConsentAPI-->>ResourceServer: Consent Valid
-        ResourceServer-->>TPP: API Response (JSON)
+        AuthServer->>AuthServer: Tạo token mới (thu hồi token cũ)
+        AuthServer->>TPP: Token mới
         
-        Note over TPP: Bước 5: Refresh Token Rotation
-        
-        TPP->>AuthServer: POST /token<br/>+ grant_type=refresh_token<br/>+ refresh_token<br/>+ client_id + client_secret
-        AuthServer->>AuthServer: Validate refresh_token<br/>Check not expired/revoked
-        AuthServer->>ConsentAPI: Verify Consent Still Active
-        ConsentAPI-->>AuthServer: ACTIVE + Not Expired
-        
-        AuthServer->>AuthServer: Generate NEW tokens:<br/>- new access_token<br/>- new refresh_token<br/>REVOKE old refresh_token
-        AuthServer->>ConsentAPI: Update Token Reference
-        AuthServer-->>TPP: new access_token<br/>+ new refresh_token
-        
-        Note over AuthServer: Token Reuse Detection:<br/>If old refresh_token used again<br/>→ REVOKE entire token family
-        
-    else User Denies
-        User->>AuthServer: Deny Consent
-        AuthServer->>ConsentAPI: Update Status: REJECTED
-        AuthServer->>App: Redirect with error<br/>+ error=access_denied
-        App->>TPP: Return error
+    else Người dùng Từ chối
+        User->>AuthServer: Từ chối
+        AuthServer->>ConsentAPI: Cập nhật trạng thái: BỊ TỪ CHỐI
+        AuthServer->>App: Chuyển hướng với lỗi
+        App->>TPP: Trả về lỗi
     end
 ```
 
-### Token Management theo Thông tư 64/2024
+### Quản Lý Token theo Thông tư 64/2024
 
-Theo **Phụ lục 01 Mục 1** của Thông tư 64/2024/TT-NHNN:
-
-| Token Type             | Thời Hạn            | Sử Dụng                     | Áp Dụng                       |
+| Loại Token             | Thời Hạn            | Sử Dụng                     | Áp Dụng                       |
 | ---------------------- | ------------------- | --------------------------- | ----------------------------- |
-| **Authorization Code** | 180 giây            | Một lần (one-time use)      | Tất cả flows                  |
-| **Access Token (INF)** | 3600 giây (1 giờ)   | Multiple use                | Client Credentials Grant      |
-| **Access Token (AIS)** | 3600 giây (1 giờ)   | Multiple use                | Authorization Code Grant      |
-| **Access Token (PIS)** | 300 giây (5 phút)   | **Một lần**                 | Authorization Code Grant      |
-| **Refresh Token**      | **Tối đa 180 ngày** | Multiple use (với rotation) | **Chỉ AIS** (Điều 11 Khoản 6) |
-| **ConsentId (PIS)**    | 300 giây            | Một lần                     | Payment flows                 |
-| **request_uri (PAR)**  | 60 giây             | Một lần                     | PAR flow                      |
+| Authorization Code     | 180 giây            | Một lần                     | Tất cả flows                  |
+| Access Token (INF)     | 3600 giây (1 giờ)   | Nhiều lần                   | Client Credentials Grant      |
+| Access Token (AIS)     | 3600 giây (1 giờ)   | Nhiều lần                   | Authorization Code Grant      |
+| Access Token (PIS)     | 300 giây (5 phút)   | Một lần                     | Authorization Code Grant      |
+| Refresh Token          | Tối đa 180 ngày     | Nhiều lần (với rotation)    | Chỉ AIS                       |
+| ConsentId (PIS)        | 300 giây            | Một lần                     | Payment flows                 |
+| request_uri (PAR)      | 60 giây             | Một lần                     | PAR flow                      |
 
-**Lưu ý quan trọng:**
-- Refresh Token **KHÔNG áp dụng** cho PIS (Payment Initiation Services)
-- Thời hạn consent tối đa: **180 ngày** (Điều 11 Khoản 6)
-- Sau 180 ngày, TPP phải yêu cầu khách hàng tái xác thực (re-authentication)
+**Lưu ý:** Refresh Token không áp dụng cho PIS. Thời hạn đồng ý tối đa 180 ngày.
 
 ## Transport Layer Security (TLS)
 
@@ -185,28 +130,7 @@ Theo **Phụ lục 02** Thông tư 64/2024, hệ thống **BẮT BUỘC** sử d
 - 🔐 **Perfect Forward Secrecy (PFS)**: Ephemeral key exchange
 - 🛡️ **Encrypted Handshake**: Bảo vệ metadata
 
-### Cipher Suites được Phép
 
-**TLS 1.3 (Recommended):**
-```
-TLS_AES_256_GCM_SHA384
-TLS_AES_128_GCM_SHA256
-TLS_CHACHA20_POLY1305_SHA256
-```
-
-**TLS 1.2 (Fallback):**
-```
-TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384
-TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256
-TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384
-TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256
-```
-
-**❌ Cipher Suites BỊ CẤM:**
-- Tất cả cipher suites sử dụng: RC4, 3DES, DES, MD5, SHA-1
-- Cipher suites không có Forward Secrecy (non-ECDHE, non-DHE)
-- Export-grade cipher suites
-- NULL cipher suites
 
 ### Mutual TLS (mTLS) - Khuyến Nghị
 
@@ -245,102 +169,6 @@ sequenceDiagram
     Gateway-->>TPP: Application Data (encrypted)
 ```
 
-### Certificate Management
-
-**Certificate Requirements:**
-
-| Attribute                          | Requirement                                                                           |
-| ---------------------------------- | ------------------------------------------------------------------------------------- |
-| **Algorithm**                      | RSA 2048-bit minimum, RSA 4096-bit recommended<br/>ECDSA P-256 or P-384 (alternative) |
-| **Signature**                      | SHA-256 minimum (SHA-384/SHA-512 recommended)                                         |
-| **Validity**                       | Maximum 398 days (13 months)                                                          |
-| **Key Usage**                      | Digital Signature, Key Encipherment                                                   |
-| **Extended Key Usage**             | TLS Web Client Authentication, TLS Web Server Authentication                          |
-| **Subject Alternative Name (SAN)** | Required for server certificates                                                      |
-
-**Certificate Lifecycle:**
-
-```mermaid
-stateDiagram-v2
-    [*] --> CSR_Generated: TPP generates CSR
-    CSR_Generated --> Submitted: Submit to Bank
-    Submitted --> Validated: Bank validates TPP identity
-    Validated --> Issued: CA issues certificate
-    Issued --> Active: Certificate deployed
-    
-    Active --> Expiring: 30 days before expiry
-    Expiring --> Renewed: Renew certificate
-    Renewed --> Active: Deploy new cert
-    
-    Active --> Revoked: Security incident
-    Active --> Expired: Validity period ends
-    
-    Revoked --> [*]
-    Expired --> [*]
-    
-    note right of Active
-        Auto-renewal 30 days
-        before expiration
-    end note
-    
-    note right of Revoked
-        Immediate revocation
-        OCSP/CRL update
-    end note
-```
-
-**Certificate Pinning (Mobile Apps):**
-
-Theo **Phụ lục 02**, khuyến nghị áp dụng Certificate Pinning cho mobile applications:
-
-```kotlin
-// Android Example - OkHttp Certificate Pinner
-val certificatePinner = CertificatePinner.Builder()
-    .add("api.bank.vn", "sha256/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
-    .add("api.bank.vn", "sha256/BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB=") // Backup pin
-    .build()
-
-val client = OkHttpClient.Builder()
-    .certificatePinner(certificatePinner)
-    .build()
-```
-
-```swift
-// iOS Example - URLSession Pinning
-func urlSession(_ session: URLSession, 
-                didReceive challenge: URLAuthenticationChallenge,
-                completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
-    
-    guard let serverTrust = challenge.protectionSpace.serverTrust else {
-        completionHandler(.cancelAuthenticationChallenge, nil)
-        return
-    }
-    
-    let certificate = SecTrustGetCertificateAtIndex(serverTrust, 0)
-    let policy = SecPolicyCreateSSL(true, challenge.protectionSpace.host as CFString)
-    
-    // Pin validation logic
-    if validateCertificatePinning(certificate) {
-        let credential = URLCredential(trust: serverTrust)
-        completionHandler(.useCredential, credential)
-    } else {
-        completionHandler(.cancelAuthenticationChallenge, nil)
-    }
-}
-```
-
-### HSTS (HTTP Strict Transport Security)
-
-**Bắt buộc** cho tất cả API endpoints:
-
-```http
-Strict-Transport-Security: max-age=31536000; includeSubDomains; preload
-```
-
-**Configuration:**
-- `max-age`: 31536000 seconds (1 year)
-- `includeSubDomains`: Apply to all subdomains
-- `preload`: Submit to HSTS preload list
 ## Client Credentials Flow (Server-to-Server)
 
 ### Tổng Quan
@@ -398,32 +226,7 @@ sequenceDiagram
     API-->>TPP: HTTP 200<br/>Response Body (JSON)
 ```
 
-### Client Assertion JWT Structure
 
-**Header:**
-```json
-{
-  "alg": "RS256",
-  "typ": "JWT",
-  "kid": "tpp-signing-key-2025-001"
-}
-```
-
-**Payload:**
-```json
-{
-  "iss": "tpp-client-id-12345",
-  "sub": "tpp-client-id-12345",
-  "aud": "https://bank.vn/oauth2/token",
-  "jti": "550e8400-e29b-41d4-a716-446655440000",
-  "exp": 1702345738,
-  "iat": 1702345678
-}
-```
-
-**Signature:** RS256 using TPP's private key
-
-### Security Controls
 
 | Control                    | Requirement                    | Enforcement            |
 | -------------------------- | ------------------------------ | ---------------------- |
@@ -458,39 +261,7 @@ graph LR
     end
 ```
 
-### Cấu Trúc JWS Header
 
-```json
-{
-  "alg": "RS256",
-  "kid": "tpp-key-2024-001",
-  "typ": "JOSE",
-  "jti": "unique-request-id-12345",
-  "iat": 1702345678
-}
-```
-
-### Payload Example
-
-```json
-{
-  "InstructionIdentification": "TXN-20241210-001",
-  "EndToEndIdentification": "E2E-12345",
-  "InstructedAmount": {
-    "Amount": "1000000.00",
-    "Currency": "VND"
-  },
-  "DebtorAccount": {
-    "Identification": "1234567890"
-  },
-  "CreditorAccount": {
-    "Identification": "0987654321",
-    "Name": "NGUYEN VAN A"
-  }
-}
-```
-
-## Consent Management - Quản Lý Sự Đồng Ý
 
 ### Tổng Quan
 
@@ -552,79 +323,7 @@ sequenceDiagram
     AuthServer-->>TPP: access_token + refresh_token
 ```
 
-### Cấu Trúc Consent Record
 
-```json
-{
-  "consentId": "consent-abc123xyz",
-  "status": "ACTIVE",
-  "createdDateTime": "2024-12-11T09:00:00+07:00",
-  "statusUpdateDateTime": "2024-12-11T09:05:00+07:00",
-  "expirationDateTime": "2025-06-09T09:05:00+07:00",
-  
-  "tppInfo": {
-    "clientId": "tpp-12345",
-    "clientName": "Example Fintech",
-    "logoUrl": "https://example.com/logo.png"
-  },
-  
-  "permissions": [
-    "accounts.read",
-    "accounts.balance.read",
-    "transactions.read"
-  ],
-  
-  "purpose": "Cung cấp dịch vụ quản lý tài chính cá nhân",
-  
-  "authorisation": {
-    "userId": "user-67890",
-    "authorisedDateTime": "2024-12-11T09:05:00+07:00",
-    "authenticationMethod": "BIOMETRIC",
-    "selectedAccounts": [
-      {
-        "accountId": "acc-111",
-        "accountType": "CURRENT",
-        "permissions": ["balance.read", "transactions.read"]
-      },
-      {
-        "accountId": "acc-222",
-        "accountType": "SAVINGS",
-        "permissions": ["balance.read"]
-      }
-    ]
-  },
-  
-  "tokenInfo": {
-    "accessTokenHash": "sha256_hash_of_token",
-    "refreshTokenHash": "sha256_hash_of_refresh_token",
-    "tokenIssuedAt": "2024-12-11T09:05:30+07:00",
-    "tokenExpiresAt": "2024-12-11T09:20:30+07:00"
-  },
-  
-  "auditTrail": [
-    {
-      "timestamp": "2024-12-11T09:00:00+07:00",
-      "action": "CONSENT_CREATED",
-      "actor": "TPP",
-      "details": "Consent request initiated"
-    },
-    {
-      "timestamp": "2024-12-11T09:05:00+07:00",
-      "action": "CONSENT_AUTHORISED",
-      "actor": "USER",
-      "details": "User approved via biometric"
-    },
-    {
-      "timestamp": "2024-12-11T09:05:30+07:00",
-      "action": "TOKEN_ISSUED",
-      "actor": "SYSTEM",
-      "details": "Access token generated"
-    }
-  ]
-}
-```
-
-### Consent Lifecycle States
 
 ```mermaid
 stateDiagram-v2
@@ -657,52 +356,7 @@ stateDiagram-v2
     end note
 ```
 
-### Consent Storage & Security
 
-**Database Schema:**
-
-```sql
-CREATE TABLE consents (
-    consent_id VARCHAR(50) PRIMARY KEY,
-    tpp_client_id VARCHAR(50) NOT NULL,
-    user_id VARCHAR(50),
-    status VARCHAR(30) NOT NULL,
-    
-    -- Permissions
-    permissions JSON NOT NULL,
-    purpose TEXT NOT NULL,
-    
-    -- Timestamps
-    created_at TIMESTAMP NOT NULL,
-    authorised_at TIMESTAMP,
-    expires_at TIMESTAMP NOT NULL,
-    revoked_at TIMESTAMP,
-    
-    -- Linked accounts (encrypted)
-    selected_accounts JSON,
-    
-    -- Token references (hashed)
-    access_token_hash VARCHAR(64),
-    refresh_token_hash VARCHAR(64),
-    
-    -- Audit
-    audit_trail JSON,
-    
-    INDEX idx_user_id (user_id),
-    INDEX idx_tpp_client_id (tpp_client_id),
-    INDEX idx_status (status),
-    INDEX idx_expires_at (expires_at)
-);
-```
-
-**Security Measures:**
-- Consent ID: Cryptographically random (UUID v4)
-- Account data: Encrypted at rest (AES-256)
-- Token hashes: SHA-256 (không lưu token gốc)
-- Audit trail: Immutable log
-- Access control: Row-level security
-
-### User Consent Management Portal
 
 ```mermaid
 graph TB
@@ -725,69 +379,7 @@ graph TB
     View --> History
 ```
 
-### API Endpoints
 
-#### 1. Create Consent (TPP)
-
-**POST /v1/consents**
-
-```json
-{
-  "permissions": [
-    "accounts.read",
-    "accounts.balance.read",
-    "transactions.read"
-  ],
-  "expirationDateTime": "2025-06-09T09:00:00+07:00",
-  "purpose": "Cung cấp dịch vụ quản lý tài chính cá nhân"
-}
-```
-
-**Response:**
-```json
-{
-  "consentId": "consent-abc123xyz",
-  "status": "AWAITING_AUTHORISATION",
-  "createdDateTime": "2024-12-11T09:00:00+07:00",
-  "expirationDateTime": "2025-06-09T09:00:00+07:00",
-  "authorisationUrl": "https://bank.vn/authorize?consent_id=consent-abc123xyz"
-}
-```
-
-#### 2. Get Consent Details
-
-**GET /v1/consents/{consentId}**
-
-```json
-{
-  "consentId": "consent-abc123xyz",
-  "status": "ACTIVE",
-  "permissions": ["accounts.read", "accounts.balance.read"],
-  "tppInfo": {
-    "clientId": "tpp-12345",
-    "clientName": "Example Fintech"
-  },
-  "authorisation": {
-    "authorisedDateTime": "2024-12-11T09:05:00+07:00",
-    "accountsCount": 2
-  },
-  "expirationDateTime": "2025-06-09T09:05:00+07:00"
-}
-```
-
-#### 3. Revoke Consent (User or TPP)
-
-**DELETE /v1/consents/{consentId}**
-
-```json
-{
-  "revocationReason": "USER_REQUESTED",
-  "revokedBy": "user-67890",
-  "revokedAt": "2024-12-11T10:00:00+07:00"
-}
-```
-
-### Consent Validation Flow
 
 ```mermaid
 graph TB
@@ -836,102 +428,11 @@ graph TB
 - Monitor suspicious patterns
 
 
-## Các Cấp Độ Xác Thực theo QĐ 2345
 
-```mermaid
-graph TB
-    subgraph "Level 1: Basic"
-        L1[Username + Password]
-    end
-    
-    subgraph "Level 2: Two-Factor"
-        L2[Password + SMS OTP]
-    end
-    
-    subgraph "Level 3: Biometric"
-        L3[Fingerprint / Face ID]
-    end
-    
-    subgraph "Level 4: Enhanced Biometric"
-        L4[NFC CCCD Chip Verification<br/>+ Face Matching]
-    end
-    
-    L1 --> L2
-    L2 --> L3
-    L3 --> L4
-    
-    style L4 fill:#ff6b6b,stroke:#c92a2a,color:#fff
-```
 
-### Quy Định Áp Dụng
 
-| Loại Giao Dịch     | Giá Trị        | Cấp Độ Bắt Buộc |
-| ------------------ | -------------- | --------------- |
-| Truy vấn thông tin | Bất kỳ         | Level 2         |
-| Chuyển tiền        | < 10 triệu VND | Level 3         |
-| Chuyển tiền        | ≥ 10 triệu VND | Level 4         |
-| Mở thẻ tín dụng    | Bất kỳ         | Level 4         |
-| Thay đổi hạn mức   | Bất kỳ         | Level 4         |
 
-## NFC CCCD Verification Flow
 
-```mermaid
-sequenceDiagram
-    participant User as User
-    participant App as TPP App
-    participant SDK as NFC SDK
-    participant API as Bank API
-    participant MPS as Ministry of Public Security
-    
-    User->>App: Initiate High-Value Transaction
-    App->>User: Request NFC Scan
-    User->>SDK: Tap CCCD to Phone
-    SDK->>SDK: Read Chip Data<br/>(DG1, DG2, SOD)
-    SDK->>SDK: Perform Active Authentication
-    SDK-->>App: Chip Data + Signature
-    
-    App->>API: POST /ekyc/nfc-verify<br/>+ Chip Data
-    API->>API: Verify Signature with<br/>MPS Root Certificate
-    API->>MPS: Validate Certificate Chain
-    MPS-->>API: Certificate Valid
-    API->>API: Extract Personal Info<br/>+ Face Image
-    API->>API: Compare with Existing CIF
-    API-->>App: Verification Result
-    
-    alt Verification Success
-        App->>API: Proceed with Transaction
-    else Verification Failed
-        App->>User: Show Error & Retry
-    end
-```
-
-## Token Management
-
-### Access Token Lifecycle
-
-```mermaid
-graph LR
-    Issue[Token Issued] --> Active[Active<br/>15 mins]
-    Active --> Expired[Expired]
-    Active --> Revoked[Revoked]
-    Expired --> Refresh[Refresh Token Used]
-    Refresh --> Issue
-    Revoked --> End[End]
-    Expired --> End
-```
-
-### Token Scopes
-
-| Scope                   | Mô Tả                   | Thời Hạn Tối Đa |
-| ----------------------- | ----------------------- | --------------- |
-| `accounts.read`         | Đọc danh sách tài khoản | 180 ngày        |
-| `accounts.balance.read` | Đọc số dư               | 180 ngày        |
-| `transactions.read`     | Đọc lịch sử giao dịch   | 180 ngày        |
-| `payments.write`        | Khởi tạo thanh toán     | 1 lần sử dụng   |
-| `cards.read`            | Đọc thông tin thẻ       | 180 ngày        |
-| `cards.write`           | Quản lý thẻ             | 90 ngày         |
-
-## Security Best Practices
 
 ### 1. Transport Security
 - **TLS 1.3** bắt buộc cho tất cả connections
@@ -962,10 +463,8 @@ graph LR
 - [ ] FAPI Security Profile compliance
 - [ ] JWS signing cho financial transactions
 - [ ] Consent management system
-- [ ] NFC CCCD verification (QĐ 2345)
 - [ ] Token expiry enforcement (180 days max)
 - [ ] Audit logging (3 months + 1 year backup)
-- [ ] HSM integration cho key management
 - [ ] mTLS cho internal services
 - [ ] Penetration testing quarterly
 
