@@ -47,15 +47,14 @@ graph TB
     
     subgraph "Data Layer"
         DB[(Transaction DB)]
-        Cache[(Redis Cache)]
-        LogDB[(Log & Audit DB)]
     end
     
     subgraph "Management Layer"
         DevPortal[Developer Portal<br/>- API Documentation<br/>- Sandbox Environment<br/>- App Management]
         TPPMgmt[TPP Management<br/>- Onboarding & Vetting<br/>- Certificate Management<br/>- Compliance Monitoring]
         AdminPortal[Admin Portal]
-        Monitor[Monitoring & Analytics]
+        Monitor[Monitoring & Analytics<br/>- Performance Metrics<br/>- Real-time Dashboards]
+        Audit[Audit & Logging<br/>- Transaction Logs<br/>- Compliance Reports]
     end
     
     TPP --> WAF
@@ -90,8 +89,9 @@ graph TB
     Recon --> DB
     Billing --> DB
     
-    APIGW --> Cache
-    APIGW --> LogDB
+    APIGW -.-> Monitor
+    APIGW -.-> Audit
+    Service -.-> Audit
     
     TPP -.-> DevPortal
     TPP -.-> TPPMgmt
@@ -100,7 +100,9 @@ graph TB
     TPPMgmt -.-> DB
     AdminPortal -.-> Monitor
     AdminPortal -.-> TPPMgmt
+    AdminPortal -.-> Audit
     Monitor -.-> APIGW
+    Audit -.-> DB
 ```
 
 ## Các Thành Phần Chính
@@ -129,9 +131,7 @@ graph TB
 - **Message Queue**: Đảm bảo reliable messaging
 
 ### 5. Data Layer
-- **Transaction DB**: PostgreSQL/Oracle cho dữ liệu giao dịch
-- **Cache**: Redis cho performance optimization
-- **Log DB**: Elasticsearch cho audit logs
+- **Transaction DB**: PostgreSQL/Oracle cho dữ liệu giao dịch và audit logs
 
 ### 6. Management Layer
 - **Developer Portal**:
@@ -145,6 +145,16 @@ graph TB
   - Quản lý chứng chỉ số (Digital Certificates) và xác thực eIDAS (nếu có)
   - Giám sát tuân thủ (Compliance Monitoring) và báo cáo định kỳ
   - Dispute management và xử lý khiếu nại
+- **Monitoring & Analytics**:
+  - Giám sát hiệu năng hệ thống real-time (API latency, throughput, error rates)
+  - Dashboard phân tích xu hướng sử dụng API
+  - Alert và notification khi có sự cố
+  - Capacity planning và resource optimization
+- **Audit & Logging**:
+  - Ghi nhận toàn bộ API calls và transactions
+  - Compliance audit trails theo yêu cầu NHNN
+  - Forensic analysis và investigation support
+  - Retention policy management cho log data
 
 ## Sơ Đồ Luồng Dữ Liệu
 
