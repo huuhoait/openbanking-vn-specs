@@ -19,7 +19,6 @@ flowchart TB
     classDef data fill:#dae8fc,stroke:#6c8ebf,stroke-width:2px,color:#000
     classDef management fill:#e0f2f1,stroke:#00695c,stroke-width:2px,color:#004d40
 
-    %% --- External Layer (Top) ---
     subgraph External [External Layer]
         direction LR
         TPP[Third Party Providers]:::external
@@ -27,15 +26,11 @@ flowchart TB
         Web[Web Applications]:::external
     end
     
-    %% --- Gateway Layer ---
     subgraph Gateway [API Gateway Layer]
         WAF[Web Application Firewall]:::gateway
         APIGW[API Gateway<br/>Rate Limiting / Routing]:::gateway
     end
 
-    %% --- Main Processing Block (Middle) ---
-    %% Using invisible links to force columns: Security | Services | Management
-    
     subgraph Security [Security Layer]
         IAM[IAM / OAuth 2.0]:::security
         Consent[Consent Mgmt]:::security
@@ -46,8 +41,11 @@ flowchart TB
         PIS[Payment Service]:::service
         CardSvc[Card Services]:::service
         eKYC[eKYC Service]:::service
-        Recon[Reconciliation]:::service
-        OtherSvc[Others ...]:::service
+        subgraph Row [ ]
+            direction LR
+            Recon[Reconciliation]:::service
+            OtherSvc[Others ...]:::service
+        end
     end
     
     subgraph Management [Management Layer]
@@ -58,12 +56,10 @@ flowchart TB
         AdminPortal[Admin Portal]:::management
     end
 
-    %% --- Integration Layer ---
     subgraph Integration [Integration Layer]
         ESB[Enterprise Service Bus]:::integration
     end
     
-    %% --- Backend Layer (Bottom) ---
     subgraph Backend [Business Records & Data]
         direction LR
         CoreBank[Core Banking]:::business
@@ -74,38 +70,30 @@ flowchart TB
         DB[(Transaction DB)]:::data
     end
 
-    %% --- Relationships ---
-    
-    %% 1. Ingress
+    %% Connections
     TPP & Mobile & Web --> WAF --> APIGW
     
-    %% 2. Gateway Routing
     APIGW --> IAM
     APIGW --> AIS & PIS & CardSvc & eKYC & Recon & OtherSvc
     
-    %% 3. Security Flow
     IAM --> Consent
     
-    %% 4. Integration Flow
     AIS & PIS & CardSvc & eKYC & Recon & OtherSvc --> ESB
     
-    %% 5. Backend Flow
     ESB --> CoreBank & CardSystem & Napas & BillingSvc & CIC
     
-    %% 6. Data & Logging
     AIS & PIS & Recon --> DB
     Audit -.-> DB
     TPPMgmt -.-> DB
     
-    %% 7. Management & Cross-Cutting
     APIGW -.-> Monitor
     TPP -.-> DevPortal & TPPMgmt
     DevPortal -.-> APIGW
     TPPMgmt -.-> IAM
 
-    %% --- Layout Hints (Invisible Links) ---
-    %% Force horizontal alignment: Security <-> Services <-> Management
     Security ~~~ Services ~~~ Management
+    
+    style Row fill:none,stroke:none
 ```
 
 ## Các Thành Phần Chính
