@@ -6,7 +6,7 @@ Hệ thống Open Banking được thiết kế theo mô hình **Microservices**
 
 ## Sơ Đồ Kiến Trúc Tổng Thể
 
-```mermaid
+```{.mermaid loc=img}
 graph TB
     subgraph "External Layer"
         TPP[Third Party Providers]
@@ -151,7 +151,7 @@ graph TB
 
 ## Sơ Đồ Luồng Dữ Liệu
 
-```mermaid
+```{.mermaid loc=img}
 sequenceDiagram
     participant TPP as Third Party Provider
     participant APIGW as API Gateway
@@ -174,29 +174,7 @@ sequenceDiagram
     APIGW-->>TPP: HTTP 200 + Response Body
 ```
 
-## Yêu Cầu Kỹ Thuật
-
-### Scalability
-- Auto-scaling dựa trên CPU/Memory metrics
-- Horizontal scaling cho tất cả microservices
-- Database sharding cho high-volume data
-
-### High Availability
-- Multi-AZ deployment
-- Active-Active configuration cho critical services
-- Disaster Recovery site với RPO < 15 phút, RTO < 1 giờ
-
-### Performance
-- API Response Time: < 200ms (query), < 1s (transaction)
-- Throughput: > 1,000 TPS
-- Cache hit ratio: > 80%
-
-### Security
-- TLS 1.3 cho tất cả connections
-- mTLS cho service-to-service communication
-- Zero-trust network architecture
 
 ## Tài Liệu Tham Khảo
 - Thông tư 64/2024/TT-NHNN
-- Open Banking UK Architecture Guidelines
 - ISO 20022 Message Standards

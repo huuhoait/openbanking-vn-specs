@@ -8,16 +8,13 @@ Tài liệu này mô tả cơ chế bảo mật và xác thực trong hệ thố
 
 **Quy định Việt Nam:**
 - Thông tư 64/2024/TT-NHNN: Quy định Open API, bảo mật và quản lý consent.
-- Circular 45/2025/TT-NHNN: Xác thực sinh trắc học bắt buộc.
-- Circular 50/2024/TT-NHNN: Strong Customer Authentication (SCA) và Multi-Factor Authentication (MFA).
 - Nghị định 13/2023/NĐ-CP: Bảo vệ dữ liệu cá nhân.
 
 **Tiêu chuẩn quốc tế:**
 - OAuth 2.1: Cải tiến OAuth 2.0 với PKCE bắt buộc.
 - FAPI 2.0: Bảo mật cấp tài chính.
 - OpenID Connect (OIDC): Xác thực danh tính.
-- ISO/IEC 27001:2022: Quản lý bảo mật thông tin.
-- PCI DSS 4.0: Bảo mật dữ liệu thẻ.
+- OWASP top 10 Web Application
 
 ### Mục Tiêu Bảo Mật
 
@@ -27,7 +24,7 @@ Tài liệu này mô tả cơ chế bảo mật và xác thực trong hệ thố
 4. Áp dụng kiến trúc Zero Trust.
 5. Đảm bảo khả năng phục hồi trước tấn công.
 
-## OAuth 2.1 Authorization Code Flow với PKCE & FAPI 2.0
+## OAuth 2.1 Authorization Code Flow 
 
 ### Tổng Quan
 
@@ -103,15 +100,15 @@ sequenceDiagram
 
 ### Quản Lý Token theo Thông tư 64/2024
 
-| Loại Token             | Thời Hạn            | Sử Dụng                     | Áp Dụng                       |
-| ---------------------- | ------------------- | --------------------------- | ----------------------------- |
-| Authorization Code     | 180 giây            | Một lần                     | Tất cả flows                  |
-| Access Token (INF)     | 3600 giây (1 giờ)   | Nhiều lần                   | Client Credentials Grant      |
-| Access Token (AIS)     | 3600 giây (1 giờ)   | Nhiều lần                   | Authorization Code Grant      |
-| Access Token (PIS)     | 300 giây (5 phút)   | Một lần                     | Authorization Code Grant      |
-| Refresh Token          | Tối đa 180 ngày     | Nhiều lần (với rotation)    | Chỉ AIS                       |
-| ConsentId (PIS)        | 300 giây            | Một lần                     | Payment flows                 |
-| request_uri (PAR)      | 60 giây             | Một lần                     | PAR flow                      |
+| Loại Token         | Thời Hạn          | Sử Dụng                  | Áp Dụng                  |
+| ------------------ | ----------------- | ------------------------ | ------------------------ |
+| Authorization Code | 180 giây          | Một lần                  | Tất cả flows             |
+| Access Token (INF) | 3600 giây (1 giờ) | Nhiều lần                | Client Credentials Grant |
+| Access Token (AIS) | 3600 giây (1 giờ) | Nhiều lần                | Authorization Code Grant |
+| Access Token (PIS) | 300 giây (5 phút) | Một lần                  | Authorization Code Grant |
+| Refresh Token      | Tối đa 180 ngày   | Nhiều lần (với rotation) | Chỉ AIS                  |
+| ConsentId (PIS)    | 300 giây          | Một lần                  | Payment flows            |
+| request_uri (PAR)  | 60 giây           | Một lần                  | PAR flow                 |
 
 **Lưu ý:** Refresh Token không áp dụng cho PIS. Thời hạn đồng ý tối đa 180 ngày.
 
@@ -251,15 +248,6 @@ sequenceDiagram
     end
 ```
 
-### Trạng Thái Consent
-
-- AWAITING_AUTHORISATION → AUTHORISED → ACTIVE → EXPIRED/REVOKED
-
-### API Endpoints Chính
-
-- POST /v1/consents: Tạo consent
-- GET /v1/consents/{consentId}: Lấy chi tiết
-- DELETE /v1/consents/{consentId}: Thu hồi
 
 ### Bảo Mật Consent
 
@@ -267,27 +255,12 @@ sequenceDiagram
 - Lưu hash token, không lưu token gốc.
 - Audit trail đầy đủ.
 
-## Token Management
-
-### Vòng Đời Access Token
-
-Phát hành → Hoạt động (15 phút) → Hết hạn hoặc Thu hồi
-
-### Token Scopes
-
-- accounts.read: Đọc tài khoản (180 ngày)
-- accounts.balance.read: Đọc số dư (180 ngày)
-- transactions.read: Đọc giao dịch (180 ngày)
-- payments.write: Khởi tạo thanh toán (1 lần)
-- cards.read: Đọc thẻ (180 ngày)
-- cards.write: Quản lý thẻ (90 ngày)
 
 ## Security Best Practices
 
 ### Transport Security
 - TLS 1.3 bắt buộc.
 - Certificate Pinning cho mobile.
-- HSTS enabled.
 
 ### API Security
 - Rate Limiting: 100 req/min.
@@ -311,16 +284,13 @@ Phát hành → Hoạt động (15 phút) → Hết hạn hoặc Thu hồi
 - [ ] FAPI 2.0 Security Profile
 - [ ] JWS signing
 - [ ] Consent management
-- [ ] NFC CCCD verification
 - [ ] Token expiry (max 180 days)
 - [ ] Audit logging
 - [ ] mTLS
-- [ ] Quarterly penetration testing
 
 ## Tài Liệu Tham Khảo
 - RFC 6749: OAuth 2.0
 - RFC 7636: PKCE
 - RFC 7515: JWS
 - FAPI Security Profile 1.0
-- QĐ 2345/QĐ-NHNN
 - TT 64/2024/TT-NHNN
