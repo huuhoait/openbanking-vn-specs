@@ -155,9 +155,9 @@ graph TB
 sequenceDiagram
     participant TPP as Third Party Provider
     participant APIGW as API Gateway
-    participant IAM as IAM Server
-    participant Service as Business Service
-    participant ESB as Core Banking ESB
+    participant IAM as Secure Auth Server
+    participant Service as Bank Service 
+    participant ESB as Integration Layer ESB
     participant Core as Core Banking
     
     TPP->>APIGW: API Request + Access Token
