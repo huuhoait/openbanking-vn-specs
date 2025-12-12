@@ -6,7 +6,8 @@ Hệ thống Open Banking được thiết kế theo mô hình **Microservices**
 
 ## Sơ Đồ Kiến Trúc Tổng Thể
 
-```{.mermaid loc=img}
+
+```mermaid
 graph TB
     subgraph "External Layer"
         TPP[Third Party Providers]
@@ -151,7 +152,8 @@ graph TB
 
 ## Sơ Đồ Luồng Dữ Liệu
 
-```{.mermaid loc=img}
+
+```mermaid
 sequenceDiagram
     participant TPP as Third Party Provider
     participant APIGW as API Gateway
