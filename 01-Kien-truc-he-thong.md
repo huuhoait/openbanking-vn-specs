@@ -44,14 +44,6 @@ flowchart TB
         Recon[Reconciliation]:::service
         OtherSvc[Others ...]:::service
     end
-    
-    subgraph Management [Management Layer]
-        DevPortal[Developer Portal]:::management
-        TPPMgmt[TPP Management]:::management
-        Monitor[Monitoring & Analytics]:::management
-        Audit[Audit & Logging]:::management
-        AdminPortal[Admin Portal]:::management
-    end
 
     subgraph Integration [Integration Layer]
         ESB[Enterprise Service Bus]:::integration
@@ -66,30 +58,63 @@ flowchart TB
         BillingSvc[Billing]:::business
         DB[(Transaction DB)]:::data
     end
+    
+    subgraph Management [Management Layer]
+        DevPortal[Developer Portal]:::management
+        TPPMgmt[TPP Management]:::management
+        Monitor[Monitoring & Analytics]:::management
+        Audit[Audit & Logging]:::management
+        AdminPortal[Admin Portal]:::management
+    end
 
-    %% Connections
-    TPP & Mobile & Web --> WAF --> APIGW
+    %% External to Gateway
+    TPP --> WAF
+    Mobile --> WAF
+    Web --> WAF
+    WAF --> APIGW
     
+    %% Gateway to Security
     APIGW --> IAM
-    APIGW --> AIS & PIS & CardSvc & eKYC & Recon & OtherSvc
-    
     IAM --> Consent
     
-    AIS & PIS & CardSvc & eKYC & Recon & OtherSvc --> ESB
+    %% Gateway to Services
+    APIGW --> AIS
+    APIGW --> PIS
+    APIGW --> CardSvc
+    APIGW --> eKYC
+    APIGW --> Recon
+    APIGW --> OtherSvc
     
-    ESB --> CoreBank & CardSystem & Napas & BillingSvc & CIC
+    %% Services to Integration
+    AIS --> ESB
+    PIS --> ESB
+    CardSvc --> ESB
+    eKYC --> ESB
+    Recon --> ESB
+    OtherSvc --> ESB
     
-    AIS & PIS & Recon --> DB
-    Audit -.-> DB
-    TPPMgmt -.-> DB
+    %% Integration to Backend
+    ESB --> CoreBank
+    ESB --> CardSystem
+    ESB --> CIC
+    ESB --> Napas
+    ESB --> BillingSvc
     
+    %% Services to Database
+    AIS --> DB
+    PIS --> DB
+    Recon --> DB
+    
+    %% Management Connections (dotted lines)
     APIGW -.-> Monitor
-    TPP -.-> DevPortal & TPPMgmt
+    TPP -.-> DevPortal
+    TPP -.-> TPPMgmt
     DevPortal -.-> APIGW
     TPPMgmt -.-> IAM
+    TPPMgmt -.-> DB
+    Audit -.-> DB
 
     %% Layout hints
-    Security ~~~ Services ~~~ Management
     AIS ~~~ PIS
     CardSvc ~~~ eKYC
     Recon ~~~ OtherSvc
