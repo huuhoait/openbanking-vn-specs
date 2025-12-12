@@ -37,27 +37,13 @@ flowchart TB
     end
     
     subgraph Services [Bank Service Layer]
-        direction TB
-        subgraph TopServices [ ]
-            direction LR
-            AIS[Account Information]:::service
-            PIS[Payment Service]:::service
-        end
-        subgraph MidServices [ ]
-            direction LR
-            CardSvc[Card Services]:::service
-            eKYC[eKYC Service]:::service
-        end
-        subgraph BotServices [ ]
-            direction LR
-            Recon[Reconciliation]:::service
-            OtherSvc[Others ...]:::service
-        end
+        AIS[Account Information]:::service
+        PIS[Payment Service]:::service
+        CardSvc[Card Services]:::service
+        eKYC[eKYC Service]:::service
+        Recon[Reconciliation]:::service
+        OtherSvc[Others ...]:::service
     end
-    
-    style TopServices fill:none,stroke:none
-    style MidServices fill:none,stroke:none
-    style BotServices fill:none,stroke:none
     
     subgraph Management [Management Layer]
         DevPortal[Developer Portal]:::management
@@ -102,9 +88,11 @@ flowchart TB
     DevPortal -.-> APIGW
     TPPMgmt -.-> IAM
 
+    %% Layout hints
     Security ~~~ Services ~~~ Management
-    
-    style Row fill:none,stroke:none
+    AIS ~~~ PIS
+    CardSvc ~~~ eKYC
+    Recon ~~~ OtherSvc
 ```
 
 ## Các Thành Phần Chính
