@@ -41,12 +41,12 @@ Hệ thống sử dụng OAuth 2.1 kết hợp FAPI 2.0 để bảo mật cấp 
 
 ```mermaid
 sequenceDiagram
-    participant User as Người dùng
-    participant TPP as Ứng dụng TPP
+    participant User as User
+    participant TPP as App TPP
     participant App as App Ngân hàng
-    participant AuthServer as Máy chủ Xác thực
-    participant ConsentAPI as API Quản lý Đồng ý
-    participant ResourceServer as Máy chủ Tài nguyên
+    participant AuthServer as AuthServer
+    participant ConsentAPI as Consent Server
+    participant ResourceServer as API Bussienses
     
     TPP->>AuthServer: POST /par (Đẩy yêu cầu ủy quyền)
     AuthServer->>TPP: request_uri (hết hạn 60s)
@@ -210,12 +210,12 @@ Consent bảo vệ quyền riêng tư, yêu cầu đồng ý rõ ràng từ ngư
 
 ```mermaid
 sequenceDiagram
-    participant User as Người dùng
+    participant User as User
     participant TPP as TPP
-    participant BankApp as App Ngân hàng
-    participant ConsentAPI as API Đồng ý
-    participant ConsentDB as Cơ sở dữ liệu Đồng ý
-    participant AuthServer as Máy chủ Xác thực
+    participant BankApp as BankApp
+    participant ConsentAPI as Consent Server
+    participant ConsentDB as Consent DB
+    participant AuthServer as AuthServer
     
     TPP->>ConsentAPI: POST /consents (quyền, mục đích, thời hạn)
     ConsentAPI->>ConsentDB: Tạo bản ghi, trạng thái: AWAITING_AUTHORISATION
