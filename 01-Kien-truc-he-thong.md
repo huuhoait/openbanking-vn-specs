@@ -24,9 +24,9 @@ graph TB
         Consent[Consent Management Service]
     end
     
-    subgraph "Service Layer"
+    subgraph "Bank Service Layer"
         AIS[Account Information Service]
-        PIS[Payment Initiation Service]
+        PIS[Payment Service]
         CardSvc[Card Services]
         eKYC[eKYC Service]
         Recon[Reconciliation Service]
@@ -37,7 +37,7 @@ graph TB
     end
     
     subgraph "Business Records"
-        CoreBank[Core Banking System<br/>T24/Flexcube]
+        CoreBank[Core Banking System]
         CardSystem[Card Management System]
         CIC[Credit Information Center]
         Napas[Napas 24/7]
