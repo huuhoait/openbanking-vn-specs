@@ -9,52 +9,63 @@ Hệ thống Open Banking được thiết kế theo mô hình **Microservices**
 
 ```mermaid
 graph TB
+    %% Define Styles
+    classDef external fill:#fcfcfc,stroke:#666,stroke-width:2px,color:#333;
+    classDef gateway fill:#e3f2fd,stroke:#1565c0,stroke-width:2px,color:#0d47a1;
+    classDef security fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px,color:#4a148c;
+    classDef service fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px,color:#1b5e20;
+    classDef integration fill:#fff3e0,stroke:#e65100,stroke-width:2px,color:#bf360c;
+    classDef business fill:#f5f5f5,stroke:#455a64,stroke-width:2px,color:#263238;
+    classDef data fill:#dae8fc,stroke:#6c8ebf,stroke-width:2px,color:#000;
+    classDef management fill:#e0f2f1,stroke:#00695c,stroke-width:2px,color:#004d40;
+
     subgraph "External Layer"
-        TPP[Third Party Providers]
-        Mobile[Mobile Apps]
-        Web[Web Applications]
+        TPP[Third Party Providers]:::external
+        Mobile[Mobile Apps]:::external
+        Web[Web Applications]:::external
     end
     
     subgraph "API Gateway Layer"
-        APIGW[API Gateway<br/>- Rate Limiting<br/>- Routing<br/>- Load Balancing]
-        WAF[Web Application Firewall]
+        APIGW[API Gateway<br/>- Rate Limiting<br/>- Routing<br/>- Load Balancing]:::gateway
+        WAF[Web Application Firewall]:::gateway
     end
     
     subgraph "Security Layer"
-        IAM[Identity & Access Management<br/>OAuth 2.0 / OIDC]
-        Consent[Consent Management Service]
+        IAM[Identity & Access Management<br/>OAuth 2.0 / OIDC]:::security
+        Consent[Consent Management Service]:::security
     end
     
     subgraph "Bank Service Layer"
-        AIS[Account Information Service]
-        PIS[Payment Service]
-        CardSvc[Card Services]
-        eKYC[eKYC Service]
-        Recon[Reconciliation Service]
+        AIS[Account Information Service]:::service
+        PIS[Payment Service]:::service
+        CardSvc[Card Services]:::service
+        eKYC[eKYC Service]:::service
+        Recon[Reconciliation Service]:::service
+        OtherSvc[Others ...]:::service
     end
     
     subgraph "Integration Layer"
-        ESB[Enterprise Service Bus<br/>Core Banking Adapter]
+        ESB[Enterprise Service Bus<br/>Core Banking Adapter]:::integration
     end
     
     subgraph "Business Records"
-        CoreBank[Core Banking System]
-        CardSystem[Card Management System]
-        CIC[Credit Information Center]
-        Napas[Napas 24/7]
-        BillingSvc[Billing Service]
+        CoreBank[Core Banking System]:::business
+        CardSystem[Card Management System]:::business
+        CIC[Credit Information Center]:::business
+        Napas[Napas 24/7]:::business
+        BillingSvc[Billing Service]:::business
     end
     
     subgraph "Data Layer"
-        DB[(Transaction DB)]
+        DB[(Transaction DB)]:::data
     end
     
     subgraph "Management Layer"
-        DevPortal[Developer Portal<br/>- API Documentation<br/>- Sandbox Environment<br/>- App Management]
-        TPPMgmt[TPP Management<br/>- Onboarding & Vetting<br/>- Certificate Management<br/>- Compliance Monitoring]
-        AdminPortal[Admin Portal]
-        Monitor[Monitoring & Analytics<br/>- Performance Metrics<br/>- Real-time Dashboards]
-        Audit[Audit & Logging<br/>- Transaction Logs<br/>- Compliance Reports]
+        DevPortal[Developer Portal<br/>- API Documentation<br/>- Sandbox Environment<br/>- App Management]:::management
+        TPPMgmt[TPP Management<br/>- Onboarding & Vetting<br/>- Certificate Management<br/>- Compliance Monitoring]:::management
+        AdminPortal[Admin Portal]:::management
+        Monitor[Monitoring & Analytics<br/>- Performance Metrics<br/>- Real-time Dashboards]:::management
+        Audit[Audit & Logging<br/>- Transaction Logs<br/>- Compliance Reports]:::management
     end
     
     TPP --> WAF
@@ -68,6 +79,7 @@ graph TB
     APIGW --> CardSvc
     APIGW --> eKYC
     APIGW --> Recon
+    APIGW --> OtherSvc
     
     IAM --> Consent
     
@@ -76,6 +88,7 @@ graph TB
     CardSvc --> ESB
     eKYC --> ESB
     Recon --> ESB
+    OtherSvc --> ESB
     
     ESB --> CoreBank
     ESB --> CardSystem
