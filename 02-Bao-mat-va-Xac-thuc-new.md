@@ -352,15 +352,15 @@ Phát hành → Hoạt động (15 phút) → Hết hạn hoặc Thu hồi
 
 ## Compliance Checklist
 
-- [ ] OAuth 2.0 + PKCE
-- [ ] FAPI Security Profile
+- [ ] OAuth 2.1 + PKCE
+- [ ] FAPI 2.0 Security Profile
 - [ ] JWS signing
 - [ ] Consent management
 - [ ] NFC CCCD verification
-- [ ] Token expiry (180 ngày max)
+- [ ] Token expiry (max 180 days)
 - [ ] Audit logging
 - [ ] mTLS
-- [ ] Penetration testing hàng quý
+- [ ] Quarterly penetration testing
 
 ## Tài Liệu Tham Khảo
 - RFC 6749: OAuth 2.0

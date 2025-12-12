@@ -157,7 +157,7 @@ sequenceDiagram
     participant APIGW as API Gateway
     participant IAM as IAM Server
     participant Service as Business Service
-    participant ESB as Core Banking Adapter
+    participant ESB as Core Banking ESB
     participant Core as Core Banking
     
     TPP->>APIGW: API Request + Access Token
