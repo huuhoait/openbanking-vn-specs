@@ -8,109 +8,104 @@ Hệ thống Open Banking được thiết kế theo mô hình **Microservices**
 
 
 ```mermaid
-graph TB
+flowchart TB
     %% Define Styles
-    classDef external fill:#fcfcfc,stroke:#666,stroke-width:2px,color:#333;
-    classDef gateway fill:#e3f2fd,stroke:#1565c0,stroke-width:2px,color:#0d47a1;
-    classDef security fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px,color:#4a148c;
-    classDef service fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px,color:#1b5e20;
-    classDef integration fill:#fff3e0,stroke:#e65100,stroke-width:2px,color:#bf360c;
-    classDef business fill:#f5f5f5,stroke:#455a64,stroke-width:2px,color:#263238;
-    classDef data fill:#dae8fc,stroke:#6c8ebf,stroke-width:2px,color:#000;
-    classDef management fill:#e0f2f1,stroke:#00695c,stroke-width:2px,color:#004d40;
+    classDef external fill:#fcfcfc,stroke:#666,stroke-width:2px,color:#333
+    classDef gateway fill:#e3f2fd,stroke:#1565c0,stroke-width:2px,color:#0d47a1
+    classDef security fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px,color:#4a148c
+    classDef service fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px,color:#1b5e20
+    classDef integration fill:#fff3e0,stroke:#e65100,stroke-width:2px,color:#bf360c
+    classDef business fill:#f5f5f5,stroke:#455a64,stroke-width:2px,color:#263238
+    classDef data fill:#dae8fc,stroke:#6c8ebf,stroke-width:2px,color:#000
+    classDef management fill:#e0f2f1,stroke:#00695c,stroke-width:2px,color:#004d40
 
-    subgraph "External Layer"
+    %% --- External Layer (Top) ---
+    subgraph External [External Layer]
+        direction LR
         TPP[Third Party Providers]:::external
         Mobile[Mobile Apps]:::external
         Web[Web Applications]:::external
     end
     
-    subgraph "API Gateway Layer"
-        APIGW[API Gateway<br/>- Rate Limiting<br/>- Routing<br/>- Load Balancing]:::gateway
+    %% --- Gateway Layer ---
+    subgraph Gateway [API Gateway Layer]
         WAF[Web Application Firewall]:::gateway
+        APIGW[API Gateway<br/>Rate Limiting / Routing]:::gateway
+    end
+
+    %% --- Main Processing Block (Middle) ---
+    %% Using invisible links to force columns: Security | Services | Management
+    
+    subgraph Security [Security Layer]
+        IAM[IAM / OAuth 2.0]:::security
+        Consent[Consent Mgmt]:::security
     end
     
-    subgraph "Security Layer"
-        IAM[Identity & Access Management<br/>OAuth 2.0 / OIDC]:::security
-        Consent[Consent Management Service]:::security
-    end
-    
-    subgraph "Bank Service Layer"
-        AIS[Account Information Service]:::service
+    subgraph Services [Bank Service Layer]
+        AIS[Account Information]:::service
         PIS[Payment Service]:::service
         CardSvc[Card Services]:::service
         eKYC[eKYC Service]:::service
-        Recon[Reconciliation Service]:::service
+        Recon[Reconciliation]:::service
         OtherSvc[Others ...]:::service
     end
     
-    subgraph "Integration Layer"
-        ESB[Enterprise Service Bus<br/>Core Banking Adapter]:::integration
+    subgraph Management [Management Layer]
+        DevPortal[Developer Portal]:::management
+        TPPMgmt[TPP Management]:::management
+        Monitor[Monitoring & Analytics]:::management
+        Audit[Audit & Logging]:::management
+        AdminPortal[Admin Portal]:::management
+    end
+
+    %% --- Integration Layer ---
+    subgraph Integration [Integration Layer]
+        ESB[Enterprise Service Bus]:::integration
     end
     
-    subgraph "Business Records"
-        CoreBank[Core Banking System]:::business
-        CardSystem[Card Management System]:::business
-        CIC[Credit Information Center]:::business
+    %% --- Backend Layer (Bottom) ---
+    subgraph Backend [Business Records & Data]
+        direction LR
+        CoreBank[Core Banking]:::business
+        CardSystem[Card System]:::business
+        CIC[Credit Info]:::business
         Napas[Napas 24/7]:::business
-        BillingSvc[Billing Service]:::business
-    end
-    
-    subgraph "Data Layer"
+        BillingSvc[Billing]:::business
         DB[(Transaction DB)]:::data
     end
+
+    %% --- Relationships ---
     
-    subgraph "Management Layer"
-        DevPortal[Developer Portal<br/>- API Documentation<br/>- Sandbox Environment<br/>- App Management]:::management
-        TPPMgmt[TPP Management<br/>- Onboarding & Vetting<br/>- Certificate Management<br/>- Compliance Monitoring]:::management
-        AdminPortal[Admin Portal]:::management
-        Monitor[Monitoring & Analytics<br/>- Performance Metrics<br/>- Real-time Dashboards]:::management
-        Audit[Audit & Logging<br/>- Transaction Logs<br/>- Compliance Reports]:::management
-    end
+    %% 1. Ingress
+    TPP & Mobile & Web --> WAF --> APIGW
     
-    TPP --> WAF
-    Mobile --> WAF
-    Web --> WAF
-    WAF --> APIGW
-    
+    %% 2. Gateway Routing
     APIGW --> IAM
-    APIGW --> AIS
-    APIGW --> PIS
-    APIGW --> CardSvc
-    APIGW --> eKYC
-    APIGW --> Recon
-    APIGW --> OtherSvc
+    APIGW --> AIS & PIS & CardSvc & eKYC & Recon & OtherSvc
     
+    %% 3. Security Flow
     IAM --> Consent
     
-    AIS --> ESB
-    PIS --> ESB
-    CardSvc --> ESB
-    eKYC --> ESB
-    Recon --> ESB
-    OtherSvc --> ESB
+    %% 4. Integration Flow
+    AIS & PIS & CardSvc & eKYC & Recon & OtherSvc --> ESB
     
-    ESB --> CoreBank
-    ESB --> CardSystem
-    ESB --> Napas
-    ESB --> BillingSvc
-    ESB --> CIC
+    %% 5. Backend Flow
+    ESB --> CoreBank & CardSystem & Napas & BillingSvc & CIC
     
-    AIS --> DB
-    PIS --> DB
-    Recon --> DB
+    %% 6. Data & Logging
+    AIS & PIS & Recon --> DB
+    Audit -.-> DB
+    TPPMgmt -.-> DB
     
+    %% 7. Management & Cross-Cutting
     APIGW -.-> Monitor
- 
- 
-    
-    TPP -.-> DevPortal
-    TPP -.-> TPPMgmt
+    TPP -.-> DevPortal & TPPMgmt
     DevPortal -.-> APIGW
     TPPMgmt -.-> IAM
-    TPPMgmt -.-> DB
-    Monitor -.-> APIGW
-    Audit -.-> DB
+
+    %% --- Layout Hints (Invisible Links) ---
+    %% Force horizontal alignment: Security <-> Services <-> Management
+    Security ~~~ Services ~~~ Management
 ```
 
 ## Các Thành Phần Chính
