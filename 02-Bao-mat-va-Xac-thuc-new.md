@@ -176,10 +176,10 @@ Strict-Transport-Security: max-age=31536000; includeSubDomains; preload
 
 ```mermaid
 sequenceDiagram
-    participant TPP as Máy chủ TPP
-    participant AuthServer as Máy chủ Xác thực
+    participant TPP as TPP Server
+    participant AuthServer as Auth Server
     participant API as API Gateway
-    participant ResourceAPI as API Tài nguyên
+    participant ResourceAPI as API Bussiness Server
     
     TPP->>AuthServer: POST /token (grant_type=client_credentials, scope=INF, client_assertion)
     AuthServer->>AuthServer: Xác thực mTLS, client assertion, scope
