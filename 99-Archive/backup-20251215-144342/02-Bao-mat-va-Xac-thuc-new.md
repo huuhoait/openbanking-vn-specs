@@ -1,0 +1,296 @@
+# Bảo Mật & Xác Thực
+
+## Tổng Quan
+
+Tài liệu này mô tả cơ chế bảo mật và xác thực trong hệ thống Open Banking, tuân thủ Thông tư 64/2024/TT-NHNN và các tiêu chuẩn quốc tế.
+
+### Khung Pháp Lý & Tiêu Chuẩn
+
+**Quy định Việt Nam:**
+- Thông tư 64/2024/TT-NHNN: Quy định Open API, bảo mật và quản lý consent.
+- Nghị định 13/2023/NĐ-CP: Bảo vệ dữ liệu cá nhân.
+
+**Tiêu chuẩn quốc tế:**
+- OAuth 2.1: Cải tiến OAuth 2.0 với PKCE bắt buộc.
+- FAPI 2.0: Bảo mật cấp tài chính.
+- OpenID Connect (OIDC): Xác thực danh tính.
+- OWASP top 10 Web Application
+
+### Mục Tiêu Bảo Mật
+
+1. Tuân thủ pháp luật đầy đủ.
+2. Bảo vệ dữ liệu khách hàng (tính bảo mật, toàn vẹn, khả dụng).
+3. Ngăn chối bỏ giao dịch bằng chữ ký số JWS.
+4. Áp dụng kiến trúc Zero Trust.
+5. Đảm bảo khả năng phục hồi trước tấn công.
+
+## OAuth 2.1 Authorization Code Flow 
+
+### Tổng Quan
+
+Hệ thống sử dụng OAuth 2.1 kết hợp FAPI 2.0 để bảo mật cấp tài chính. Các cải tiến chính:
+- PKCE bắt buộc.
+- Loại bỏ Implicit Grant và Password Grant.
+- Refresh Token Rotation bắt buộc.
+- Ưu tiên xác thực bất đối xứng (JWT, mTLS).
+
+### Luồng Xác Thực với PAR (Pushed Authorization Request)
+
+```mermaid
+sequenceDiagram
+    participant User as User
+    participant TPP as App TPP
+    participant App as App Ngân hàng
+    participant AuthServer as AuthServer
+    participant ConsentAPI as Consent Server
+    participant ResourceServer as API Bussienses
+    
+    TPP->>AuthServer: POST /par (Đẩy yêu cầu ủy quyền)
+    AuthServer->>TPP: request_uri (hết hạn 60s)
+    
+    TPP->>App: Deeplink với request_uri
+    App->>AuthServer: GET /authorize
+    AuthServer->>User: Màn hình đăng nhập
+    User->>AuthServer: Xác thực (sinh trắc học/OTP)
+    
+    AuthServer->>ConsentAPI: Tạo yêu cầu đồng ý
+    ConsentAPI->>AuthServer: ID Đồng ý
+    
+    AuthServer->>User: Màn hình đồng ý (quyền truy cập, tài khoản, thời hạn tối đa 180 ngày)
+    
+    alt Người dùng Đồng ý
+        User->>AuthServer: Đồng ý + Chọn tài khoản
+        AuthServer->>ConsentAPI: Cập nhật trạng thái: ĐÃ ĐỒNG Ý
+        AuthServer->>AuthServer: Tạo authorization_code (hết hạn 180s)
+        AuthServer->>App: Chuyển hướng với authorization_code
+        App->>TPP: Trả về authorization_code
+        
+        TPP->>AuthServer: POST /token (đổi token)
+        AuthServer->>AuthServer: Xác thực code_verifier khớp code_challenge
+        AuthServer->>ConsentAPI: Xác thực đồng ý
+        ConsentAPI->>AuthServer: ĐÃ ĐỒNG Ý + Quyền + Tài khoản
+        
+        AuthServer->>AuthServer: Tạo token: access_token (3600s cho AIS), refresh_token (tối đa 180 ngày), id_token
+        AuthServer->>ConsentAPI: Cập nhật trạng thái: HOẠT ĐỘNG
+        AuthServer->>TPP: access_token + refresh_token + id_token
+        
+        TPP->>TPP: Tạo DPoP Proof JWT
+        TPP->>ResourceServer: Yêu cầu API với DPoP
+        ResourceServer->>AuthServer: Kiểm tra token
+        AuthServer->>ResourceServer: Token hợp lệ + Quyền + Đồng ý
+        ResourceServer->>ConsentAPI: Xác thực đồng ý hoạt động
+        ConsentAPI->>ResourceServer: Đồng ý hợp lệ
+        ResourceServer->>TPP: Phản hồi API
+        
+        TPP->>AuthServer: POST /token (làm mới token)
+        AuthServer->>AuthServer: Xác thực refresh_token
+        AuthServer->>ConsentAPI: Xác thực đồng ý còn hoạt động
+        ConsentAPI->>AuthServer: HOẠT ĐỘNG
+        
+        AuthServer->>AuthServer: Tạo token mới (thu hồi token cũ)
+        AuthServer->>TPP: Token mới
+        
+    else Người dùng Từ chối
+        User->>AuthServer: Từ chối
+        AuthServer->>ConsentAPI: Cập nhật trạng thái: BỊ TỪ CHỐI
+        AuthServer->>App: Chuyển hướng với lỗi
+        App->>TPP: Trả về lỗi
+    end
+```
+
+### Quản Lý Token theo Thông tư 64/2024
+
+| Loại Token         | Thời Hạn          | Sử Dụng                  | Áp Dụng                  |
+| ------------------ | ----------------- | ------------------------ | ------------------------ |
+| Authorization Code | 180 giây          | Một lần                  | Tất cả flows             |
+| Access Token (INF) | 3600 giây (1 giờ) | Nhiều lần                | Client Credentials Grant |
+| Access Token (AIS) | 3600 giây (1 giờ) | Nhiều lần                | Authorization Code Grant |
+| Access Token (PIS) | 300 giây (5 phút) | Một lần                  | Authorization Code Grant |
+| Refresh Token      | Tối đa 180 ngày   | Nhiều lần (với rotation) | Chỉ AIS                  |
+| ConsentId (PIS)    | 300 giây          | Một lần                  | Payment flows            |
+| request_uri (PAR)  | 60 giây           | Một lần                  | PAR flow                 |
+
+**Lưu ý:** Refresh Token không áp dụng cho PIS. Thời hạn đồng ý tối đa 180 ngày.
+
+## Transport Layer Security (TLS)
+
+### TLS 1.3 - Bắt Buộc
+
+Theo Phụ lục 02, bắt buộc sử dụng TLS 1.2 trở lên, khuyến nghị TLS 1.3.
+
+**Lợi ích TLS 1.3:**
+- Handshake nhanh hơn.
+- Forward Secrecy mặc định.
+- Loại bỏ cipher suites yếu.
+- Handshake được mã hóa.
+
+### Cipher Suites Được Phép
+
+**TLS 1.3 (Khuyến nghị):**
+- TLS_AES_256_GCM_SHA384
+- TLS_AES_128_GCM_SHA256
+- TLS_CHACHA20_POLY1305_SHA256
+
+**TLS 1.2 (Dự phòng):**
+- TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384
+- TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256
+
+**Cấm:** Cipher suites sử dụng RC4, 3DES, MD5, SHA-1, hoặc không có Forward Secrecy.
+
+### Mutual TLS (mTLS) - Khuyến Nghị
+
+Áp dụng cho Client Credentials Flow và giao tiếp nội bộ.
+
+### Quản Lý Chứng Chỉ
+
+**Yêu cầu:**
+- Thuật toán: RSA 2048-bit tối thiểu.
+- Chữ ký: SHA-256 tối thiểu.
+- Thời hạn: Tối đa 398 ngày.
+- Key Usage: Digital Signature, Key Encipherment.
+
+**Vòng đời chứng chỉ:**
+- Tạo CSR → Nộp → Xác thực → Phát hành → Hoạt động → Gia hạn (30 ngày trước hết hạn) → Thu hồi nếu cần.
+
+**Certificate Pinning cho Mobile Apps:** Khuyến nghị để ngăn chặn tấn công man-in-the-middle.
+
+### HSTS (HTTP Strict Transport Security)
+
+Bắt buộc cho tất cả endpoints:
+```
+Strict-Transport-Security: max-age=31536000; includeSubDomains; preload
+```
+
+## Client Credentials Flow (Server-to-Server)
+
+Áp dụng cho truy vấn thông tin công khai (INF APIs), health check, batch processing.
+
+**Yêu cầu bảo mật:**
+- mTLS bắt buộc.
+- Client Assertion JWT khuyến nghị.
+- IP Whitelisting bắt buộc cho Production.
+- Rate Limiting: 100 req/min per client.
+
+```mermaid
+sequenceDiagram
+    participant TPP as TPP Server
+    participant AuthServer as Auth Server
+    participant API as API Gateway
+    participant ResourceAPI as API Bussiness Server
+    
+    TPP->>AuthServer: POST /token (grant_type=client_credentials, scope=INF, client_assertion)
+    AuthServer->>AuthServer: Xác thực mTLS, client assertion, scope
+    AuthServer->>TPP: access_token (hết hạn 3600s)
+    
+    TPP->>API: GET /v1/exchange-rates (Authorization: Bearer {access_token})
+    API->>AuthServer: POST /introspect (token)
+    AuthServer->>API: active=true, scope=INF
+    API->>ResourceAPI: Chuyển tiếp yêu cầu
+    ResourceAPI->>API: Dữ liệu tỷ giá
+    API->>TPP: Phản hồi JSON
+```
+
+## JWS (JSON Web Signature) cho Non-Repudiation
+
+Sử dụng JWS để ký yêu cầu, ngăn chối bỏ.
+
+**Cấu trúc:**
+- Header: alg=RS256, kid, typ=JOSE, jti, iat
+- Payload: Dữ liệu giao dịch
+- Signature: Ký bằng private key TPP
+
+## Consent Management - Quản Lý Sự Đồng Ý
+
+Consent bảo vệ quyền riêng tư, yêu cầu đồng ý rõ ràng từ người dùng.
+
+### Quy Trình Tạo Consent
+
+```mermaid
+sequenceDiagram
+    participant User as User
+    participant TPP as TPP
+    participant BankApp as BankApp
+    participant ConsentAPI as Consent Server
+    participant ConsentDB as Consent DB
+    participant AuthServer as AuthServer
+    
+    TPP->>ConsentAPI: POST /consents (quyền, mục đích, thời hạn)
+    ConsentAPI->>ConsentDB: Tạo bản ghi, trạng thái: AWAITING_AUTHORISATION
+    ConsentAPI->>TPP: consentId + URL ủy quyền
+    
+    TPP->>BankApp: Chuyển hướng với consentId
+    BankApp->>ConsentAPI: GET /consents/{consentId}
+    ConsentAPI->>BankApp: Chi tiết đồng ý
+    
+    BankApp->>User: Màn hình đồng ý
+    
+    alt Đồng ý
+        User->>BankApp: Đồng ý + Chọn tài khoản
+        BankApp->>ConsentAPI: PUT /consents/{consentId}/authorise
+        ConsentAPI->>ConsentDB: Cập nhật: AUTHORISED
+        ConsentAPI->>AuthServer: Tạo authorization_code
+        AuthServer->>ConsentAPI: authorization_code
+        ConsentAPI->>BankApp: authorization_code
+        BankApp->>TPP: Chuyển hướng với auth_code
+        
+        TPP->>AuthServer: POST /token
+        AuthServer->>ConsentDB: Xác thực trạng thái
+        AuthServer->>AuthServer: Tạo access_token + refresh_token
+        AuthServer->>ConsentDB: Cập nhật: ACTIVE
+        AuthServer->>TPP: token
+        
+    else Từ chối
+        User->>BankApp: Từ chối
+        BankApp->>ConsentAPI: PUT /consents/{consentId}/reject
+        ConsentAPI->>ConsentDB: REJECTED
+        ConsentAPI->>BankApp: Từ chối
+        BankApp->>TPP: Chuyển hướng với lỗi
+    end
+```
+
+
+### Bảo Mật Consent
+
+- Mã hóa dữ liệu nhạy cảm.
+- Lưu hash token, không lưu token gốc.
+- Audit trail đầy đủ.
+
+
+## Security Best Practices
+
+### Transport Security
+- TLS 1.3 bắt buộc.
+- Certificate Pinning cho mobile.
+
+### API Security
+- Rate Limiting: 100 req/min.
+- IP Whitelisting.
+- Request Signing (JWS) cho mutation.
+
+### Data Protection
+- Mã hóa dữ liệu nghỉ: AES-256.
+- Mã hóa truyền tải: TLS 1.3.
+- Che PII trong logs.
+- Lưu trữ dữ liệu: Logs giao dịch 5 năm, access logs 3 tháng online + 1 năm offline.
+
+### Incident Response
+- Giám sát thời gian thực.
+- Cảnh báo tự động.
+- Thông báo vi phạm trong 72 giờ.
+
+## Compliance Checklist
+
+- [ ] OAuth 2.1 + PKCE
+- [ ] FAPI 2.0 Security Profile
+- [ ] JWS signing
+- [ ] Consent management
+- [ ] Token expiry (max 180 days)
+- [ ] Audit logging
+- [ ] mTLS
+
+## Tài Liệu Tham Khảo
+- RFC 6749: OAuth 2.0
+- RFC 7636: PKCE
+- RFC 7515: JWS
+- FAPI Security Profile 1.0
+- TT 64/2024/TT-NHNN
