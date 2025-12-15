@@ -1,345 +1,347 @@
-# Vận Hành & Yêu Cầu Phi Chức Năng (Operations & NFR)
+# Vận Hành & Yêu Cầu Phi Chức Năng (NFR)
+
+> **Tuân thủ:** ISO/IEC 25010 (Quality Model) | ITIL v4 | ISO 22301 (Business Continuity)
 
 ## Tổng Quan
 
-Tài liệu này mô tả các yêu cầu phi chức năng (Non-Functional Requirements) và quy trình vận hành hệ thống Open Banking.
+Tài liệu này định nghĩa các yêu cầu phi chức năng (Non-Functional Requirements) và quy trình vận hành để đảm bảo hệ thống Open Banking hoạt động ổn định, bảo mật, và đáp ứng SLA cam kết.
 
-## Yêu Cầu Hiệu Năng (Performance Requirements)
+## SLA (Service Level Agreement)
+
+### Availability Targets
+
+| Service | Target Uptime | Max Downtime/Year | Max Downtime/Month |
+|---------|---------------|-------------------|---------------------|
+| **Core APIs** | 99.95% | 4.38 hours | 21.6 minutes |
+| **Payment APIs** | 99.99% | 52.56 minutes | 4.32 minutes |
+| **Developer Portal** | 99.9% | 8.76 hours | 43.2 minutes |
+| **Monitoring** | 99.5% | 43.8 hours | 3.6 hours |
+
+**Measurement:**
+```
+Uptime % = (Total Time - Downtime) / Total Time × 100
+
+Planned Maintenance: Excluded (with 72h notice)
+Force Majeure: Excluded
+```
 
 ### Response Time Targets
 
 ```mermaid
-graph TB
-    subgraph "API Response Time SLA"
-        Query[Query APIs<br/>< 200ms]
-        Transaction[Transaction APIs<br/>< 1s]
-        Report[Report Generation<br/>< 5 min]
-        Batch[Batch Processing<br/>< 30 min]
-    end
-    
-    subgraph "Percentiles"
-        P50[P50: 100ms]
-        P95[P95: 500ms]
-        P99[P99: 1s]
-    end
-    
-    Query --> P50
-    Transaction --> P95
-    Report --> P99
-```
-
-### Performance Benchmarks
-
-| API Category | P50 | P95 | P99 | Max |
-|--------------|-----|-----|-----|-----|
-| Account Info | 50ms | 150ms | 300ms | 500ms |
-| Balance Inquiry | 80ms | 200ms | 400ms | 500ms |
-| Transaction History | 100ms | 300ms | 600ms | 1s |
-| Payment Initiation | 200ms | 800ms | 1.5s | 2s |
-| eKYC OCR | 500ms | 1s | 2s | 3s |
-| Face Matching | 300ms | 800ms | 1.5s | 2s |
-| NFC Verification | 1s | 2s | 3s | 5s |
-
-### Throughput Requirements
-
-```mermaid
 graph LR
-    subgraph "Capacity Planning"
-        Normal[Normal Load<br/>1,000 TPS]
-        Peak[Peak Load<br/>5,000 TPS]
-        Burst[Burst Load<br/>10,000 TPS]
+    subgraph "API Response Time SLA"
+        Query[Query APIs<br/>GET /accounts<br/>---<br/>P95: < 200ms<br/>P99: < 500ms]
+        
+        Txn[Transaction APIs<br/>GET /transactions<br/>---<br/>P95: < 500ms<br/>P99: < 1s]
+        
+        Payment[Payment APIs<br/>POST /payments<br/>---<br/>P95: < 2s<br/>P99: < 5s]
+        
+        Batch[Batch APIs<br/>File upload<br/>---<br/>Async<br/>< 5 minutes]
     end
     
-    subgraph "Auto-Scaling"
-        Scale_Out[Scale Out<br/>Add Instances]
-        Scale_In[Scale In<br/>Remove Instances]
-    end
-    
-    Normal --> Scale_Out
-    Peak --> Scale_Out
-    Burst --> Scale_Out
-    
-    Normal --> Scale_In
+    style Query fill:#4caf50,color:#fff
+    style Payment fill:#ff9800
 ```
 
-**Capacity Targets:**
-- Normal Operations: 1,000 TPS
-- Peak Hours (9-11 AM, 7-9 PM): 5,000 TPS
-- Flash Sales / Campaigns: 10,000 TPS
-- Sustained Load: 24/7 operation
+**Performance Metrics:**
+- **P50 (Median)**: 50% of requests faster than X
+- **P95**: 95% of requests faster than X
+- **P99**: 99% of requests faster than X
+- **P99.9**: 99.9% of requests faster than X
 
-## Tính Sẵn Sàng (Availability)
-
-### High Availability Architecture
+### Throughput Capacity
 
 ```mermaid
 graph TB
-    subgraph "Load Balancer"
-        LB[Load Balancer<br/>Active-Active]
+    subgraph "Capacity Planning"
+        Peak[Peak Load<br/>---<br/>• 50,000 req/sec<br/>• 09:00-11:00<br/>• 14:00-16:00]
+        
+        Normal[Normal Load<br/>---<br/>• 10,000 req/sec<br/>• Business hours<br/>• 80% baseline]
+        
+        Low[Low Load<br/>---<br/>• 2,000 req/sec<br/>• Night hours<br/>• 20% baseline]
     end
     
-    subgraph "Zone A"
-        API_A1[API Gateway A1]
-        API_A2[API Gateway A2]
-        Service_A[Services A]
-        DB_A[(Database A<br/>Primary)]
+    subgraph "Auto-scaling"
+        Scale[Auto-scale Rules<br/>---<br/>• CPU > 70%: +2 pods<br/>• Memory > 80%: +2 pods<br/>• Queue depth > 1000: +3 pods<br/>• Scale down after 10 min]
     end
     
-    subgraph "Zone B"
-        API_B1[API Gateway B1]
-        API_B2[API Gateway B2]
-        Service_B[Services B]
-        DB_B[(Database B<br/>Replica)]
-    end
+    Peak --> Scale
+    Normal --> Scale
+    Low --> Scale
     
-    subgraph "Zone C - DR"
-        API_C[API Gateway C]
-        Service_C[Services C]
-        DB_C[(Database C<br/>Standby)]
-    end
-    
-    LB --> API_A1
-    LB --> API_A2
-    LB --> API_B1
-    LB --> API_B2
-    
-    API_A1 --> Service_A
-    API_A2 --> Service_A
-    Service_A --> DB_A
-    
-    API_B1 --> Service_B
-    API_B2 --> Service_B
-    Service_B --> DB_B
-    
-    DB_A -.->|Replication| DB_B
-    DB_A -.->|Async Replication| DB_C
+    style Peak fill:#f44336,color:#fff
+    style Scale fill:#4caf50,color:#fff
 ```
 
-### SLA Commitments
+## Architecture for High Availability
 
-| Service Level | Uptime % | Downtime/Month | Downtime/Year |
-|---------------|----------|----------------|---------------|
-| **Gold** | 99.99% | 4.38 minutes | 52.6 minutes |
-| **Silver** | 99.95% | 21.9 minutes | 4.38 hours |
-| **Bronze** | 99.9% | 43.8 minutes | 8.77 hours |
-
-**Target SLA: 99.99% (Gold)**
-
-### Failover Strategy
+### Multi-Region Deployment
 
 ```mermaid
-sequenceDiagram
-    participant Client as Client
-    participant LB as Load Balancer
-    participant Primary as Primary Zone
-    participant Secondary as Secondary Zone
-    participant Monitor as Health Monitor
+graph TB
+    subgraph "Global Load Balancer"
+        GLB[AWS Route53<br/>GeoDNS + Health Check]
+    end
     
-    Client->>LB: API Request
-    LB->>Primary: Route Request
+    subgraph "Region 1 - Ho Chi Minh"
+        LB1[Load Balancer<br/>ALB]
+        AZ1A[AZ-1a<br/>API Pods × 3]
+        AZ1B[AZ-1b<br/>API Pods × 3]
+        DB1[Aurora Primary<br/>Multi-AZ]
+        Cache1[Redis Cluster<br/>3 nodes]
+    end
     
-    Note over Primary: Primary Zone Fails
+    subgraph "Region 2 - Ha Noi"
+        LB2[Load Balancer<br/>ALB]
+        AZ2A[AZ-2a<br/>API Pods × 3]
+        AZ2B[AZ-2b<br/>API Pods × 3]
+        DB2[Aurora Read Replica<br/>Multi-AZ]
+        Cache2[Redis Cluster<br/>3 nodes]
+    end
     
-    Primary--xLB: No Response
-    Monitor->>Monitor: Detect Failure
-    Monitor->>LB: Mark Primary Unhealthy
+    GLB -->|Primary| LB1
+    GLB -->|Failover| LB2
     
-    LB->>Secondary: Route to Secondary
-    Secondary-->>LB: Response
-    LB-->>Client: Response
+    LB1 --> AZ1A
+    LB1 --> AZ1B
     
-    Note over Monitor: Primary Recovered
+    LB2 --> AZ2A
+    LB2 --> AZ2B
     
-    Monitor->>Monitor: Detect Recovery
-    Monitor->>LB: Mark Primary Healthy
-    LB->>Primary: Resume Traffic
+    AZ1A --> DB1
+    AZ1B --> DB1
+    AZ1A --> Cache1
+    AZ1B --> Cache1
+    
+    AZ2A --> DB2
+    AZ2B --> DB2
+    AZ2A --> Cache2
+    AZ2B --> Cache2
+    
+    DB1 -.->|Replication| DB2
+    
+    style GLB fill:#4caf50,color:#fff
+    style DB1 fill:#2196f3,color:#fff
+    style DB2 fill:#2196f3,color:#fff
 ```
 
-## Disaster Recovery (DR)
+### Database Architecture
+
+```mermaid
+graph TB
+    subgraph "Write Path"
+        App_W[Application<br/>Write Operations]
+        Primary[Aurora Primary<br/>Writer Instance]
+    end
+    
+    subgraph "Read Path"
+        App_R[Application<br/>Read Operations]
+        Reader_LB[Reader Endpoint<br/>Load Balancer]
+        Replica1[Read Replica 1<br/>AZ-1a]
+        Replica2[Read Replica 2<br/>AZ-1b]
+        Replica3[Read Replica 3<br/>Cross-region]
+    end
+    
+    subgraph "Backup"
+        Snapshot[Automated Snapshots<br/>Daily + Continuous]
+        S3[S3 Backup<br/>7-year retention]
+    end
+    
+    App_W --> Primary
+    Primary -->|Replication| Replica1
+    Primary -->|Replication| Replica2
+    Primary -->|Replication| Replica3
+    
+    App_R --> Reader_LB
+    Reader_LB --> Replica1
+    Reader_LB --> Replica2
+    Reader_LB --> Replica3
+    
+    Primary --> Snapshot
+    Snapshot --> S3
+    
+    style Primary fill:#4caf50,color:#fff
+    style Reader_LB fill:#2196f3,color:#fff
+```
+
+## Disaster Recovery
 
 ### RPO & RTO Targets
 
 ```mermaid
 graph LR
     subgraph "Recovery Objectives"
-        RPO[RPO: < 15 minutes<br/>Recovery Point Objective]
-        RTO[RTO: < 1 hour<br/>Recovery Time Objective]
+        RPO[RPO<br/>Recovery Point Objective<br/>---<br/>Max data loss: 1 hour<br/>Continuous replication]
+        
+        RTO[RTO<br/>Recovery Time Objective<br/>---<br/>Max downtime: 4 hours<br/>Auto-failover: 5 min]
     end
     
-    subgraph "Data Protection"
-        Sync[Synchronous Replication<br/>Critical Data]
-        Async[Asynchronous Replication<br/>Non-Critical Data]
-        Backup[Daily Backups<br/>Retained 30 days]
+    subgraph "Backup Strategy"
+        Continuous[Continuous Backup<br/>---<br/>• Transaction logs<br/>• Point-in-time recovery<br/>• 35-day retention]
+        
+        Daily[Daily Snapshots<br/>---<br/>• Full database<br/>• Encrypted<br/>• Multi-region copy]
+        
+        Weekly[Weekly Archive<br/>---<br/>• Long-term storage<br/>• S3 Glacier<br/>• 7-year retention]
     end
     
-    RPO --> Sync
-    RPO --> Async
-    RTO --> Backup
+    RPO --> Continuous
+    RTO --> Continuous
+    Continuous --> Daily
+    Daily --> Weekly
+    
+    style RPO fill:#f44336,color:#fff
+    style RTO fill:#ff9800
 ```
 
 ### DR Procedures
 
 ```mermaid
-stateDiagram-v2
-    [*] --> Normal: System Operating
-    Normal --> Incident: Disaster Detected
-    Incident --> Assessment: Assess Impact
-    Assessment --> Decision: DR Required?
+sequenceDiagram
+    participant Mon as Monitoring
+    participant Ops as Operations Team
+    participant LB as Load Balancer
+    participant Primary as Primary Region
+    participant DR as DR Region
+    participant Comm as Communications
     
-    Decision --> Failover: Yes
-    Decision --> Normal: No (Minor Issue)
+    Note over Mon: Detect Outage
+    Mon->>Mon: Health check failed × 3
+    Mon->>Ops: Alert: Primary down 🚨
     
-    Failover --> Activate_DR: Activate DR Site
-    Activate_DR --> Verify: Verify DR Operations
-    Verify --> Production: Promote DR to Production
+    Ops->>Ops: Verify: True outage
+    Ops->>Comm: Notify stakeholders
     
-    Production --> Recovery: Primary Site Recovery
-    Recovery --> Failback: Failback to Primary
-    Failback --> Normal: Resume Normal Operations
-```
-
-### Backup Strategy
-
-| Data Type | Backup Frequency | Retention | Storage |
-|-----------|------------------|-----------|---------|
-| Transaction DB | Real-time replication | 30 days | Multi-region |
-| Configuration | Daily | 90 days | S3 |
-| Audit Logs | Hourly | 1 year | Glacier |
-| Application Code | On commit | Indefinite | Git |
-| Secrets/Keys | On change | 90 days | Vault |
-
-## Scalability
-
-### Horizontal Scaling
-
-```mermaid
-graph TB
-    subgraph "Auto-Scaling Policy"
-        Monitor[CloudWatch Metrics]
-        
-        Monitor --> CPU{CPU > 70%}
-        Monitor --> Memory{Memory > 80%}
-        Monitor --> Requests{Requests > 1000/s}
-        
-        CPU -->|Yes| ScaleOut[Add 2 Instances]
-        Memory -->|Yes| ScaleOut
-        Requests -->|Yes| ScaleOut
-        
-        CPU -->|No| Check[Check Scale In]
-        Memory -->|No| Check
-        Requests -->|No| Check
-        
-        Check --> Low{CPU < 30%<br/>for 10 min}
-        Low -->|Yes| ScaleIn[Remove 1 Instance]
-        Low -->|No| Monitor
-    end
-```
-
-### Database Scaling
-
-```mermaid
-graph LR
-    subgraph "Read Scaling"
-        Primary[(Primary DB<br/>Write)]
-        Replica1[(Read Replica 1)]
-        Replica2[(Read Replica 2)]
-        Replica3[(Read Replica 3)]
-        
-        Primary -.->|Replication| Replica1
-        Primary -.->|Replication| Replica2
-        Primary -.->|Replication| Replica3
-    end
+    Ops->>LB: Initiate Failover
+    LB->>LB: Update DNS<br/>TTL: 60s
+    LB->>DR: Route traffic to DR
     
-    subgraph "Write Scaling"
-        Shard1[(Shard 1<br/>Accounts A-M)]
-        Shard2[(Shard 2<br/>Accounts N-Z)]
+    DR->>DR: Verify services up
+    DR->>DR: Promote read replica<br/>to primary
+    
+    DR-->>LB: Ready
+    LB-->>Ops: Failover complete
+    
+    Ops->>Comm: Status: Running on DR
+    
+    Note over Ops: Monitor DR performance
+    
+    alt Primary Recovered
+        Ops->>Primary: Restore services
+        Primary->>Primary: Sync data from DR
+        Ops->>LB: Failback to primary
+        LB->>Primary: Route traffic back
+        Ops->>Comm: Resolved: Back to primary
     end
 ```
 
 ## Monitoring & Observability
 
-### Monitoring Stack
+### Monitoring Architecture
 
 ```mermaid
 graph TB
     subgraph "Data Collection"
-        Metrics[Metrics<br/>Prometheus]
-        Logs[Logs<br/>ELK Stack]
-        Traces[Traces<br/>Jaeger]
+        App[Applications<br/>OpenTelemetry]
+        Infra[Infrastructure<br/>Node Exporter]
+        DB[Databases<br/>CloudWatch]
+        LB[Load Balancers<br/>Access Logs]
+    end
+    
+    subgraph "Aggregation"
+        Prometheus[Prometheus<br/>Metrics Storage]
+        Loki[Loki<br/>Log Aggregation]
+        Tempo[Tempo<br/>Distributed Tracing]
     end
     
     subgraph "Visualization"
-        Grafana[Grafana Dashboards]
-        Kibana[Kibana]
+        Grafana[Grafana<br/>Dashboards]
+        Alert[AlertManager<br/>Notifications]
     end
     
-    subgraph "Alerting"
-        AlertManager[Alert Manager]
-        PagerDuty[PagerDuty]
-        Slack[Slack]
+    subgraph "Notifications"
+        PagerDuty[PagerDuty<br/>On-call]
+        Slack[Slack<br/>Team channel]
+        Email[Email<br/>Management]
     end
     
-    Metrics --> Grafana
-    Logs --> Kibana
-    Traces --> Grafana
+    App --> Prometheus
+    App --> Loki
+    App --> Tempo
+    Infra --> Prometheus
+    DB --> Prometheus
+    LB --> Loki
     
-    Metrics --> AlertManager
-    AlertManager --> PagerDuty
-    AlertManager --> Slack
+    Prometheus --> Grafana
+    Loki --> Grafana
+    Tempo --> Grafana
+    
+    Prometheus --> Alert
+    Alert --> PagerDuty
+    Alert --> Slack
+    Alert --> Email
+    
+    style Alert fill:#f44336,color:#fff
+    style Grafana fill:#ff9800
 ```
 
-### Key Metrics
-
-#### Golden Signals
+### Key Metrics (Golden Signals)
 
 ```mermaid
-graph LR
-    subgraph "Four Golden Signals"
-        Latency[Latency<br/>Response Time]
-        Traffic[Traffic<br/>Requests/sec]
-        Errors[Errors<br/>Error Rate %]
-        Saturation[Saturation<br/>Resource Usage]
+graph TB
+    subgraph "Golden Signals"
+        Latency[Latency<br/>---<br/>• Response time<br/>• P50, P95, P99<br/>• By endpoint]
+        
+        Traffic[Traffic<br/>---<br/>• Requests/sec<br/>• By TPP<br/>• By API type]
+        
+        Errors[Errors<br/>---<br/>• Error rate %<br/>• 4xx, 5xx<br/>• By status code]
+        
+        Saturation[Saturation<br/>---<br/>• CPU usage<br/>• Memory usage<br/>• Queue depth]
     end
     
-    subgraph "Thresholds"
-        L_Warn[> 500ms: Warning]
-        L_Crit[> 1s: Critical]
-        
-        E_Warn[> 1%: Warning]
-        E_Crit[> 5%: Critical]
-        
-        S_Warn[> 80%: Warning]
-        S_Crit[> 90%: Critical]
+    subgraph "Business Metrics"
+        TPP_Active[Active TPPs<br/>Daily/Monthly]
+        Revenue[Revenue<br/>Real-time]
+        Conversion[Conversion Rate<br/>Sandbox → Prod]
     end
     
-    Latency --> L_Warn
-    Latency --> L_Crit
-    Errors --> E_Warn
-    Errors --> E_Crit
-    Saturation --> S_Warn
-    Saturation --> S_Crit
+    style Errors fill:#f44336,color:#fff
+    style Revenue fill:#4caf50,color:#fff
 ```
-
-#### Business Metrics
-
-- **API Call Volume**: Calls per minute/hour/day
-- **Success Rate**: % of successful API calls
-- **Revenue**: Daily/Monthly revenue from APIs
-- **Active TPPs**: Number of active TPP integrations
-- **Transaction Value**: Total transaction value processed
 
 ### Alerting Rules
 
-| Alert | Condition | Severity | Action |
-|-------|-----------|----------|--------|
-| High Error Rate | Error rate > 5% for 5 min | Critical | Page on-call engineer |
-| Slow Response | P95 latency > 1s for 10 min | Warning | Investigate |
-| Service Down | Health check fails 3 times | Critical | Immediate failover |
-| High CPU | CPU > 90% for 5 min | Warning | Auto-scale |
-| Disk Full | Disk usage > 85% | Warning | Clean up logs |
-| Certificate Expiry | SSL cert expires in 7 days | Warning | Renew certificate |
-| Quota Exceeded | TPP exceeds quota | Info | Notify TPP |
-| Failed Payments | Payment failure > 10% | Critical | Investigate |
+```mermaid
+graph TB
+    subgraph "Critical Alerts (P1)"
+        Down[Service Down<br/>---<br/>• Health check failed<br/>• Page on-call<br/>• RTO: 15 min]
+        
+        Error[High Error Rate<br/>---<br/>• >5% errors<br/>• Page on-call<br/>• RTO: 30 min]
+        
+        Payment[Payment Failures<br/>---<br/>• >1% failed<br/>• Page on-call<br/>• RTO: 15 min]
+    end
+    
+    subgraph "Warning Alerts (P2)"
+        Slow[Slow Response<br/>---<br/>• P95 > SLA + 50%<br/>• Slack notify<br/>• RTO: 2 hours]
+        
+        Capacity[High Load<br/>---<br/>• CPU > 80%<br/>• Slack notify<br/>• RTO: 4 hours]
+    end
+    
+    subgraph "Info Alerts (P3)"
+        Quota[Quota Warning<br/>---<br/>• 80% used<br/>• Email<br/>• RTO: 24 hours]
+    end
+    
+    Down --> PagerDuty[PagerDuty]
+    Error --> PagerDuty
+    Payment --> PagerDuty
+    
+    Slow --> Slack[Slack]
+    Capacity --> Slack
+    
+    Quota --> Email[Email]
+    
+    style Down fill:#f44336,color:#fff
+    style Payment fill:#f44336,color:#fff
+```
 
 ## Security Operations
 
@@ -347,385 +349,279 @@ graph LR
 
 ```mermaid
 graph TB
-    subgraph "Security Events"
-        Auth[Failed Authentication]
-        Intrusion[Intrusion Attempts]
-        DataBreach[Data Access Anomalies]
-        DDoS[DDoS Attacks]
+    subgraph "Threat Detection"
+        WAF[AWS WAF<br/>---<br/>• SQL injection<br/>• XSS attacks<br/>• Rate limit abuse]
+        
+        IDS[Intrusion Detection<br/>---<br/>• Unusual patterns<br/>• Brute force<br/>• Data exfiltration]
+        
+        Audit[Audit Logs<br/>---<br/>• All API calls<br/>• Admin actions<br/>• Data access]
     end
     
     subgraph "SIEM"
-        Collect[Event Collection]
-        Correlate[Correlation Engine]
-        Analyze[Threat Analysis]
+        Splunk[Splunk<br/>Security Analytics]
     end
     
     subgraph "Response"
-        Alert[Security Alerts]
-        Block[Auto-Block]
-        Incident[Incident Response]
+        SOC[SOC Team<br/>24/7]
+        Block[Auto-block<br/>Suspicious IPs]
+        Incident[Incident Response<br/>Playbook]
     end
     
-    Auth --> Collect
-    Intrusion --> Collect
-    DataBreach --> Collect
-    DDoS --> Collect
+    WAF --> Splunk
+    IDS --> Splunk
+    Audit --> Splunk
     
-    Collect --> Correlate
-    Correlate --> Analyze
+    Splunk --> SOC
+    SOC --> Block
+    SOC --> Incident
     
-    Analyze --> Alert
-    Analyze --> Block
-    Alert --> Incident
+    style WAF fill:#f44336,color:#fff
+    style SOC fill:#ff9800
 ```
 
 ### Incident Response
 
 ```mermaid
-stateDiagram-v2
-    [*] --> Detection: Security Event
-    Detection --> Triage: Assess Severity
-    
-    Triage --> P1: Critical
-    Triage --> P2: High
-    Triage --> P3: Medium
-    Triage --> P4: Low
-    
-    P1 --> Contain: Immediate Action
-    P2 --> Contain: Within 1 hour
-    P3 --> Investigate: Within 4 hours
-    P4 --> Investigate: Within 24 hours
-    
-    Contain --> Investigate
-    Investigate --> Remediate
-    Remediate --> Recover
-    Recover --> PostMortem
-    PostMortem --> [*]
-```
-
-### Penetration Testing
-
-- **Frequency**: Quarterly
-- **Scope**: All public-facing APIs
-- **Standards**: OWASP Top 10, SANS Top 25
-- **Report**: Within 2 weeks of test completion
-
-## Logging & Audit
-
-### Log Levels
-
-```mermaid
-graph LR
-    subgraph "Log Levels"
-        ERROR[ERROR<br/>System errors]
-        WARN[WARN<br/>Warnings]
-        INFO[INFO<br/>Important events]
-        DEBUG[DEBUG<br/>Detailed info]
-    end
-    
-    subgraph "Environments"
-        Prod[Production<br/>INFO & above]
-        UAT[UAT<br/>DEBUG & above]
-        Dev[Development<br/>All levels]
-    end
-    
-    ERROR --> Prod
-    WARN --> Prod
-    INFO --> Prod
-    
-    ERROR --> UAT
-    WARN --> UAT
-    INFO --> UAT
-    DEBUG --> UAT
-```
-
-### Audit Logging
-
-**Required Fields:**
-```json
-{
-  "timestamp": "2024-12-10T18:00:00+07:00",
-  "event_type": "API_ACCESS",
-  "user_id": "user-12345",
-  "client_id": "tpp-67890",
-  "ip_address": "203.162.xxx.xxx",
-  "endpoint": "/v1/accounts/acc-123/balances",
-  "method": "GET",
-  "status_code": 200,
-  "response_time_ms": 125,
-  "request_id": "req-abc123",
-  "session_id": "sess-xyz789"
-}
-```
-
-**Retention:**
-- Hot storage (Elasticsearch): 3 months
-- Cold storage (S3): 1 year
-- Archive (Glacier): 5 years
-
-## Deployment Strategy
-
-### CI/CD Pipeline
-
-```mermaid
-graph LR
-    subgraph "Development"
-        Code[Code Commit]
-        Build[Build & Test]
-        Scan[Security Scan]
-    end
-    
-    subgraph "Staging"
-        Deploy_UAT[Deploy to UAT]
-        Test_UAT[Integration Tests]
-        Approve[Manual Approval]
-    end
-    
-    subgraph "Production"
-        Deploy_Prod[Deploy to Prod]
-        Smoke[Smoke Tests]
-        Monitor[Monitor]
-    end
-    
-    Code --> Build
-    Build --> Scan
-    Scan --> Deploy_UAT
-    Deploy_UAT --> Test_UAT
-    Test_UAT --> Approve
-    Approve --> Deploy_Prod
-    Deploy_Prod --> Smoke
-    Smoke --> Monitor
-```
-
-### Blue-Green Deployment
-
-```mermaid
 graph TB
-    subgraph "Current State"
-        LB1[Load Balancer]
-        Blue[Blue Environment<br/>v1.0 - 100% Traffic]
-        Green[Green Environment<br/>v1.1 - 0% Traffic]
-    end
+    Detection[Incident Detected]
     
-    LB1 --> Blue
-    LB1 -.->|No Traffic| Green
+    Detection --> Classify{Severity}
     
-    subgraph "After Deployment"
-        LB2[Load Balancer]
-        Blue2[Blue Environment<br/>v1.0 - 0% Traffic]
-        Green2[Green Environment<br/>v1.1 - 100% Traffic]
-    end
+    Classify -->|P1 Critical| P1[P1: System Down<br/>---<br/>• Page on-call<br/>• War room<br/>• Exec notification]
     
-    LB2 -.->|No Traffic| Blue2
-    LB2 --> Green2
-```
-
-### Canary Deployment
-
-```mermaid
-graph TB
-    Start[Deploy New Version]
+    Classify -->|P2 High| P2[P2: Degraded Service<br/>---<br/>• Alert team<br/>• Incident channel<br/>• Manager notification]
     
-    Start --> Phase1[Phase 1: 5% Traffic]
-    Phase1 --> Check1{Metrics OK?}
-    Check1 -->|No| Rollback[Rollback]
-    Check1 -->|Yes| Phase2[Phase 2: 25% Traffic]
+    Classify -->|P3 Medium| P3[P3: Minor Issue<br/>---<br/>• Create ticket<br/>• Normal workflow<br/>• No notification]
     
-    Phase2 --> Check2{Metrics OK?}
-    Check2 -->|No| Rollback
-    Check2 -->|Yes| Phase3[Phase 3: 50% Traffic]
+    P1 --> Respond[Incident Response]
+    P2 --> Respond
+    P3 --> Respond
     
-    Phase3 --> Check3{Metrics OK?}
-    Check3 -->|No| Rollback
-    Check3 -->|Yes| Phase4[Phase 4: 100% Traffic]
+    Respond --> Resolve[Resolve Issue]
+    Resolve --> RCA[Root Cause Analysis]
+    RCA --> Improve[Implement Improvements]
     
-    Phase4 --> Complete[Deployment Complete]
+    style P1 fill:#f44336,color:#fff
+    style Respond fill:#ff9800
 ```
 
 ## Capacity Planning
 
-### Resource Forecasting
-
-```mermaid
-graph TB
-    subgraph "Forecasting Model"
-        Historical[Historical Data<br/>6 months]
-        Growth[Growth Rate<br/>20% MoM]
-        Seasonal[Seasonal Patterns<br/>Peak hours]
-    end
-    
-    subgraph "Projections"
-        Month1[Month +1<br/>1,200 TPS]
-        Month3[Month +3<br/>1,700 TPS]
-        Month6[Month +6<br/>3,000 TPS]
-    end
-    
-    Historical --> Month1
-    Growth --> Month1
-    Seasonal --> Month1
-    
-    Month1 --> Month3
-    Month3 --> Month6
-```
-
-### Cost Optimization
-
-| Resource | Current | Optimized | Savings |
-|----------|---------|-----------|---------|
-| Compute | 50 instances | 40 instances (right-sizing) | 20% |
-| Database | 10 TB | 8 TB (archiving old data) | 20% |
-| Storage | 100 TB | 70 TB (compression) | 30% |
-| Network | 50 TB/month | 40 TB/month (caching) | 20% |
-
-## Compliance & Governance
-
-### Compliance Framework
-
-```mermaid
-graph TB
-    subgraph "Regulatory"
-        TT64[Thông tư 64/2024]
-        QD2345[Quyết định 2345]
-        ND13[Nghị định 13/2023]
-    end
-    
-    subgraph "Standards"
-        ISO27001[ISO 27001<br/>Information Security]
-        ISO20022[ISO 20022<br/>Financial Messages]
-        PCI_DSS[PCI DSS<br/>Payment Card]
-    end
-    
-    subgraph "Best Practices"
-        OWASP[OWASP Top 10]
-        NIST[NIST Cybersecurity]
-        CIS[CIS Benchmarks]
-    end
-```
-
-### Audit Schedule
-
-| Audit Type | Frequency | Scope |
-|------------|-----------|-------|
-| Internal Security Audit | Monthly | All systems |
-| External Security Audit | Quarterly | Public APIs |
-| Compliance Audit | Annually | Full system |
-| Penetration Testing | Quarterly | External-facing |
-| Code Review | Per release | All code changes |
-| Access Review | Monthly | User permissions |
-
-## Documentation
-
-### Documentation Types
+### Growth Projection
 
 ```mermaid
 graph LR
-    subgraph "Technical Docs"
-        API[API Documentation<br/>OpenAPI Spec]
-        Arch[Architecture Docs]
-        Runbook[Runbooks]
+    subgraph "Current (Year 1)"
+        TPP1[TPPs: 50<br/>API Calls: 100M/month<br/>Peak: 5K req/sec]
     end
     
-    subgraph "User Docs"
-        Guide[Integration Guide]
-        Tutorial[Tutorials]
-        FAQ[FAQ]
+    subgraph "Year 2"
+        TPP2[TPPs: 200<br/>API Calls: 500M/month<br/>Peak: 25K req/sec]
     end
     
-    subgraph "Operational Docs"
-        SOP[Standard Operating<br/>Procedures]
-        Incident[Incident Response<br/>Playbooks]
-        DR_Plan[DR Plan]
+    subgraph "Year 3"
+        TPP3[TPPs: 500<br/>API Calls: 2B/month<br/>Peak: 100K req/sec]
     end
+    
+    TPP1 -->|4x growth| TPP2
+    TPP2 -->|4x growth| TPP3
+    
+    style TPP3 fill:#4caf50,color:#fff
 ```
 
-### Documentation Standards
+### Infrastructure Scaling
 
-- **Format**: Markdown for version control
-- **Location**: Git repository
-- **Review**: Quarterly review and update
-- **Versioning**: Semantic versioning
-- **Language**: Vietnamese & English
+| Component | Current | Year 2 | Year 3 |
+|-----------|---------|--------|--------|
+| **API Pods** | 20 | 80 | 320 |
+| **Database** | 1 × db.r6g.2xlarge | 2 × db.r6g.8xlarge | 4 × db.r6g.16xlarge |
+| **Redis** | 3-node (8GB) | 6-node (32GB) | 12-node (128GB) |
+| **Storage** | 500GB | 5TB | 50TB |
+| **Monthly Cost** | $10,000 | $50,000 | $250,000 |
 
-## Change Management
+## Performance Optimization
 
-### Change Process
-
-```mermaid
-stateDiagram-v2
-    [*] --> Request: Change Request
-    Request --> Assessment: Impact Assessment
-    Assessment --> Approval: CAB Review
-    
-    Approval --> Approved: Approved
-    Approval --> Rejected: Rejected
-    
-    Approved --> Schedule: Schedule Change
-    Schedule --> Implement: Implement Change
-    Implement --> Verify: Verify Success
-    
-    Verify --> Success: Success
-    Verify --> Failed: Failed
-    
-    Failed --> Rollback: Rollback
-    Rollback --> PostMortem
-    Success --> PostMortem
-    
-    PostMortem --> [*]
-    Rejected --> [*]
-```
-
-### Change Categories
-
-| Category | Approval | Testing | Rollback Plan |
-|----------|----------|---------|---------------|
-| **Emergency** | CTO | Minimal | Required |
-| **Standard** | CAB | Full | Required |
-| **Minor** | Team Lead | Automated | Optional |
-| **Pre-approved** | None | Automated | Optional |
-
-## SLA Reporting
-
-### Monthly SLA Report
+### Caching Strategy
 
 ```mermaid
 graph TB
-    subgraph "Metrics"
-        Uptime[Uptime %]
-        Latency[Avg Latency]
-        Errors[Error Rate]
-        Incidents[Incident Count]
+    Request[API Request]
+    
+    Request --> L1{L1 Cache<br/>Redis<br/>TTL: 60s}
+    
+    L1 -->|Hit| Return1[Return Cached]
+    L1 -->|Miss| L2{L2 Cache<br/>Application<br/>TTL: 300s}
+    
+    L2 -->|Hit| Return2[Return Cached]
+    L2 -->|Miss| DB[Query Database]
+    
+    DB --> Cache[Update Caches]
+    Cache --> Return3[Return Fresh Data]
+    
+    style L1 fill:#4caf50,color:#fff
+    style Return1 fill:#4caf50,color:#fff
+```
+
+**Cache Hit Ratio Target:** >95%
+
+### Database Optimization
+
+```mermaid
+graph TB
+    subgraph "Query Optimization"
+        Index[Indexing Strategy<br/>---<br/>• Primary keys<br/>• Foreign keys<br/>• Query patterns]
+        
+        Partition[Table Partitioning<br/>---<br/>• By date (monthly)<br/>• By TPP ID<br/>• Archive old data]
+        
+        Pool[Connection Pooling<br/>---<br/>• Min: 10<br/>• Max: 100<br/>• Timeout: 30s]
     end
     
-    subgraph "Analysis"
-        Trend[Trend Analysis]
-        RootCause[Root Cause]
-        Action[Action Items]
+    subgraph "Read/Write Split"
+        Write[Write Operations<br/>→ Primary]
+        Read[Read Operations<br/>→ Read Replicas]
     end
     
-    subgraph "Stakeholders"
-        TPP[TPP Partners]
-        Management[Management]
-        Regulators[Regulators]
+    Index --> Performance[Query Performance<br/>< 100ms]
+    Partition --> Performance
+    Pool --> Performance
+    
+    style Performance fill:#4caf50,color:#fff
+```
+
+## Change Management
+
+### Deployment Pipeline
+
+```mermaid
+graph LR
+    Dev[Development<br/>Local env]
+    
+    Dev --> PR[Pull Request<br/>Code review]
+    PR --> CI{CI Pipeline}
+    
+    CI -->|Pass| Build[Build Image<br/>Docker]
+    CI -->|Fail| Reject[❌ Reject]
+    
+    Build --> Test[Automated Tests<br/>Unit + Integration]
+    
+    Test -->|Pass| Staging[Deploy Staging<br/>Canary 10%]
+    Test -->|Fail| Reject2[❌ Rollback]
+    
+    Staging --> Approve{Manual Approval<br/>QA Sign-off}
+    
+    Approve -->|✓| Prod[Deploy Production<br/>Blue-Green]
+    Approve -->|✗| Reject3[❌ Cancel]
+    
+    Prod --> Monitor[Monitor 1 hour]
+    Monitor -->|Success| Done[✓ Complete]
+    Monitor -->|Issues| Rollback[↩ Auto-rollback]
+    
+    style Prod fill:#4caf50,color:#fff
+    style Rollback fill:#f44336,color:#fff
+```
+
+### Deployment Schedule
+
+**Production Deployments:**
+- **Preferred Window**: Tuesday & Thursday, 10:00-12:00
+- **Freeze Period**: Friday, Holidays, Month-end
+- **Change Advisory Board**: Weekly review
+- **Emergency Hotfix**: Anytime with approval
+
+## Compliance & Audit
+
+### Audit Requirements
+
+```mermaid
+graph TB
+    subgraph "Audit Trail"
+        API[API Access Logs<br/>---<br/>• Who<br/>• What<br/>• When<br/>• Result]
+        
+        Admin[Admin Actions<br/>---<br/>• Configuration changes<br/>• User management<br/>• Permission changes]
+        
+        Data[Data Access<br/>---<br/>• PII access<br/>• Data export<br/>• Consent usage]
     end
     
-    Uptime --> Trend
-    Latency --> Trend
-    Errors --> RootCause
-    Incidents --> RootCause
+    subgraph "Retention"
+        Hot[Hot Storage<br/>90 days<br/>Fast access]
+        
+        Warm[Warm Storage<br/>1 year<br/>S3]
+        
+        Cold[Cold Storage<br/>7 years<br/>Glacier]
+    end
     
-    Trend --> Action
-    RootCause --> Action
+    API --> Hot
+    Admin --> Hot
+    Data --> Hot
     
-    Action --> TPP
-    Action --> Management
-    Action --> Regulators
+    Hot --> Warm
+    Warm --> Cold
+    
+    style Cold fill:#2196f3,color:#fff
+```
+
+### Compliance Checklist
+
+**Regular Audits:**
+- ✅ **ISO 27001** - Annual certification
+- ✅ **PCI DSS 4.0** - Quarterly scan
+- ✅ **SOC 2 Type II** - Annual audit
+- ✅ **Penetration Testing** - Quarterly
+- ✅ **Vulnerability Scanning** - Weekly
+- ✅ **Access Review** - Monthly
+- ✅ **Backup Testing** - Monthly
+- ✅ **DR Drill** - Quarterly
+
+## Cost Management
+
+### Cost Optimization
+
+```mermaid
+graph TB
+    subgraph "Compute"
+        Spot[Spot Instances<br/>---<br/>• Non-prod: 90% savings<br/>• Batch jobs<br/>• Auto-fallback]
+        
+        Reserved[Reserved Instances<br/>---<br/>• Prod: 40% savings<br/>• 1-year commit<br/>• Steady workload]
+        
+        Serverless[Serverless<br/>---<br/>• Lambda for tasks<br/>• Pay per use<br/>• Auto-scale]
+    end
+    
+    subgraph "Storage"
+        Lifecycle[S3 Lifecycle<br/>---<br/>• Hot → Warm: 30 days<br/>• Warm → Cold: 90 days<br/>• Delete: 7 years]
+        
+        Compression[Compression<br/>---<br/>• Logs: gzip<br/>• Backups: encrypted<br/>• 70% reduction]
+    end
+    
+    subgraph "Monitoring"
+        Budget[Budget Alerts<br/>---<br/>• 80%: Warning<br/>• 100%: Critical<br/>• Auto-report]
+    end
+    
+    style Spot fill:#4caf50,color:#fff
+    style Budget fill:#ff9800
+```
+
+### Cost Breakdown (Monthly)
+
+```mermaid
+pie title Infrastructure Cost Distribution
+    "Compute (EC2/EKS)" : 40
+    "Database (Aurora)" : 25
+    "Networking (ALB/NAT)" : 15
+    "Storage (S3/EBS)" : 10
+    "Monitoring (CloudWatch)" : 5
+    "Other (Backups/DNS)" : 5
 ```
 
 ## Tài Liệu Tham Khảo
-- Thông tư 64/2024/TT-NHNN
-- ISO/IEC 27001:2013 - Information Security Management
-- NIST Cybersecurity Framework
-- Site Reliability Engineering (Google)
-- AWS Well-Architected Framework
-- The Twelve-Factor App
-- ITIL v4 - IT Service Management
+
+- **ISO/IEC 25010:2011** - Systems and Software Quality Models
+- **ITIL v4** - IT Service Management
+- **ISO 22301:2019** - Business Continuity Management
+- **AWS Well-Architected Framework** - Best Practices
+- **Google SRE Book** - Site Reliability Engineering
+
+---
+
+**Phiên bản:** 1.0  
+**Ngày cập nhật:** 15/12/2025  
+**Trạng thái:** Production Ready

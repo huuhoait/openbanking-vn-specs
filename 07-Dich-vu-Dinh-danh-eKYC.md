@@ -1,707 +1,632 @@
-# Dịch Vụ Định Danh & Bảo Mật (eKYC & Identity Services)
+# Dịch Vụ Định Danh Điện Tử (eKYC - Electronic Know Your Customer)
+
+> **Tuân thủ:** Thông tư 64/2024/TT-NHNN | Circular 45/2025 | Quyết định 2345/QĐ-NHNN | ISO 30107 (Liveness Detection)
 
 ## Tổng Quan
 
-Nhóm API cung cấp dịch vụ định danh điện tử (eKYC), xác thực sinh trắc học và xác thực NFC CCCD theo Quyết định 2345/QĐ-NHNN.
+Dịch vụ eKYC cho phép TPP xác thực danh tính khách hàng từ xa thông qua CCCD gắn chip, sinh trắc học và OCR, tuân thủ Circular 45/2025.
+
+### Phạm Vi Dịch Vụ
+
+1. **NFC Verification**: Đọc thông tin từ CCCD gắn chip qua NFC
+2. **OCR Document**: Nhận diện thông tin từ ảnh CCCD
+3. **Face Matching**: So khớp khuôn mặt với ảnh CCCD
+4. **Liveness Detection**: Phát hiện khuôn mặt thật (chống ảnh, video)
+5. **Risk Scoring**: Đánh giá rủi ro gian lận
 
 ## Kiến Trúc eKYC
 
 ```mermaid
 graph TB
-    subgraph "Client Layer"
-        Mobile[Mobile App]
-        Web[Web App]
+    subgraph "TPP Layer"
+        TPP[TPP Application]
+        Mobile[Mobile SDK]
     end
     
     subgraph "API Gateway"
         Gateway[API Gateway]
+        RateLimit[Rate Limiter<br/>10 req/min per IP]
     end
     
     subgraph "eKYC Services"
-        OCR[OCR Service<br/>Document Extraction]
-        Liveness[Liveness Detection<br/>Anti-Spoofing]
-        FaceMatch[Face Matching<br/>AI/ML]
-        NFC[NFC Verification<br/>CCCD Chip]
+        NFC[NFC Reader Service]
+        OCR[OCR Engine<br/>Tesseract + AI]
+        Face[Face Recognition<br/>Deep Learning]
+        Liveness[Liveness Detection<br/>Anti-spoofing]
+        Risk[Risk Scoring Engine]
     end
     
-    subgraph "External Services"
-        MPS[Ministry of Public Security<br/>Certificate Validation]
-        Blacklist[Sanction/AML Lists]
+    subgraph "Data Sources"
+        CCCD[(CCCD Database<br/>Ministry)]
+        Blacklist[(Blacklist Database)]
+        AML[(AML Watch List)]
     end
     
-    subgraph "Data Storage"
-        KYCVault[(eKYC Vault<br/>Encrypted Storage)]
-        AuditLog[(Audit Logs)]
+    subgraph "Storage"
+        S3[Encrypted Storage<br/>S3/MinIO]
+        Vault[Secrets Vault]
     end
     
+    TPP --> Gateway
     Mobile --> Gateway
-    Web --> Gateway
-    Gateway --> OCR
-    Gateway --> Liveness
-    Gateway --> FaceMatch
-    Gateway --> NFC
+    Gateway --> RateLimit
     
-    NFC --> MPS
-    FaceMatch --> Blacklist
+    RateLimit --> NFC
+    RateLimit --> OCR
+    RateLimit --> Face
+    RateLimit --> Liveness
     
-    OCR --> KYCVault
-    Liveness --> KYCVault
-    FaceMatch --> KYCVault
-    NFC --> KYCVault
+    NFC --> CCCD
+    OCR --> Risk
+    Face --> Risk
+    Liveness --> Risk
     
-    Gateway --> AuditLog
-```
-
-## eKYC Flow - Standard Process
-
-```mermaid
-sequenceDiagram
-    participant User as End User
-    participant App as Mobile App
-    participant API as eKYC API
-    participant OCR as OCR Engine
-    participant Liveness as Liveness Service
-    participant FaceMatch as Face Matching
-    participant Blacklist as AML/Sanction Check
-    participant Vault as KYC Vault
+    Risk --> Blacklist
+    Risk --> AML
     
-    Note over User,App: Step 1: Document Capture
-    User->>App: Capture ID Front
-    App->>API: POST /ekyc/ocr<br/>+ Front Image
-    API->>OCR: Extract Data
-    OCR-->>API: Extracted Fields
+    NFC --> S3
+    OCR --> S3
+    Face --> S3
     
-    User->>App: Capture ID Back
-    App->>API: POST /ekyc/ocr<br/>+ Back Image
-    API->>OCR: Extract Data
-    OCR-->>API: Extracted Fields
-    
-    Note over User,App: Step 2: Liveness Check
-    User->>App: Perform Liveness Actions<br/>(Blink, Turn head)
-    App->>API: POST /ekyc/liveness<br/>+ Video/Images
-    API->>Liveness: Analyze Liveness
-    Liveness-->>API: Liveness Score
-    
-    alt Liveness Failed
-        API-->>App: Retry Required
-    end
-    
-    Note over User,App: Step 3: Face Matching
-    API->>FaceMatch: Compare Selfie vs ID Photo
-    FaceMatch-->>API: Similarity Score (0-100)
-    
-    alt Score < 80%
-        API-->>App: Face Match Failed
-    end
-    
-    Note over API,Blacklist: Step 4: AML/Sanction Check
-    API->>Blacklist: Check Name + DOB + ID Number
-    Blacklist-->>API: Clear / Hit
-    
-    alt Sanction Hit
-        API-->>App: KYC Rejected
-    end
-    
-    Note over API,Vault: Step 5: Store Results
-    API->>Vault: Encrypt & Store KYC Data
-    Vault-->>API: eKYC Reference ID
-    
-    API-->>App: 200 OK<br/>eKYC Reference ID<br/>Verification Status
+    style NFC fill:#4caf50,stroke:#2e7d32,color:#fff
+    style Liveness fill:#ff9800,stroke:#e65100
+    style Risk fill:#f44336,stroke:#c62828,color:#fff
 ```
 
 ## API Endpoints
 
-### 1. OCR - Document Extraction
+### 1. NFC Verification
 
-#### POST /v1/ekyc/ocr
+#### POST /v1/ekyc/nfc/verify
+
+Đọc và xác thực thông tin từ CCCD gắn chip qua NFC.
 
 ```mermaid
-graph TB
-    Image[ID Card Image]
+sequenceDiagram
+    participant User
+    participant Mobile
+    participant Gateway
+    participant eKYC as eKYC Service
+    participant CCCD_DB as CCCD Database<br/>(Ministry)
+    participant Risk
     
-    Image --> Preprocess[Image Preprocessing<br/>- Crop<br/>- Rotate<br/>- Enhance]
-    Preprocess --> Detect[Detect Document Type<br/>CCCD/CMND/Passport]
-    Detect --> Extract[OCR Extraction]
+    User->>Mobile: Tap CCCD on Phone
+    Mobile->>Mobile: Read NFC Chip<br/>ISO 14443
+    Mobile->>Mobile: Extract Data:<br/>• ID Number<br/>• Name, DOB<br/>• Photo<br/>• Digital Signature
     
-    Extract --> Parse[Parse Fields]
-    Parse --> Validate[Validate Format<br/>- ID Number<br/>- Date Format<br/>- Checksum]
+    Mobile->>Gateway: POST /ekyc/nfc/verify<br/>+ Encrypted NFC Data
+    Gateway->>eKYC: Decrypt & Validate
     
-    Validate -->|Valid| Return[Return Structured Data]
-    Validate -->|Invalid| Error[Return Error]
+    eKYC->>eKYC: Verify Digital Signature<br/>using Public Key
+    
+    alt Signature Valid
+        eKYC->>CCCD_DB: Verify ID Number<br/>Check validity
+        CCCD_DB-->>eKYC: Valid + Status
+        
+        eKYC->>Risk: Calculate Risk Score
+        Risk-->>eKYC: Score: 85/100 (Low Risk)
+        
+        eKYC-->>Gateway: Verification Success
+        Gateway-->>Mobile: 200 OK + Verified Data
+    else Signature Invalid
+        eKYC-->>Gateway: 400 Bad Request<br/>Invalid Signature
+        Gateway-->>Mobile: Verification Failed
+    end
 ```
 
 **Request:**
 ```json
 {
-  "DocumentType": "CCCD",
-  "Side": "FRONT",
-  "Image": "base64_encoded_image_data",
-  "ImageFormat": "JPEG"
+  "NFCData": "base64_encrypted_data_from_chip",
+  "DeviceInfo": {
+    "DeviceId": "device-abc123",
+    "OSVersion": "iOS 17.2",
+    "AppVersion": "2.1.0"
+  },
+  "Location": {
+    "Latitude": 10.7769,
+    "Longitude": 106.7009
+  }
 }
 ```
 
 **Response:**
 ```json
 {
-  "Data": {
-    "DocumentType": "CCCD",
-    "IDNumber": "001234567890",
+  "VerificationId": "verify-nfc-123456",
+  "Status": "Verified",
+  "PersonalInfo": {
+    "IdNumber": "001099001234",
     "FullName": "NGUYEN VAN A",
     "DateOfBirth": "01/01/1990",
-    "Gender": "Nam",
-    "Nationality": "Việt Nam",
-    "PlaceOfOrigin": "Hà Nội",
-    "PlaceOfResidence": "123 Nguyễn Huệ, Q.1, TP.HCM",
-    "ExpiryDate": "01/01/2035",
-    "Confidence": {
-      "Overall": 0.95,
-      "IDNumber": 0.98,
-      "FullName": 0.96,
-      "DateOfBirth": 0.97
-    },
-    "FaceImage": "base64_encoded_face_crop"
-  }
+    "Gender": "Male",
+    "Nationality": "Vietnam",
+    "PlaceOfOrigin": "Hanoi",
+    "PlaceOfResidence": "123 Nguyen Hue, District 1, HCMC",
+    "IssueDate": "01/01/2020",
+    "ExpiryDate": "01/01/2035"
+  },
+  "Photo": "base64_encoded_photo",
+  "RiskScore": 85,
+  "RiskLevel": "Low",
+  "VerifiedAt": "2025-12-15T10:30:00+07:00"
 }
 ```
 
-### 2. Liveness Detection
+### 2. OCR Document Recognition
 
-#### POST /v1/ekyc/liveness
+#### POST /v1/ekyc/ocr/document
+
+Nhận diện thông tin từ ảnh chụp CCCD.
 
 ```mermaid
 graph TB
-    Input[Video/Image Sequence]
+    Upload[Upload Front + Back Images]
     
-    Input --> DetectFace[Detect Face in Frames]
-    DetectFace --> CheckActions{Check Actions}
+    Upload --> Preprocess[Image Preprocessing<br/>• Deskew<br/>• Denoise<br/>• Enhance]
     
-    CheckActions --> Blink[Blink Detection]
-    CheckActions --> Turn[Head Turn Detection]
-    CheckActions --> Smile[Smile Detection]
+    Preprocess --> Detect{Document<br/>Detection}
+    Detect -->|Not Found| Error1[400: Invalid Document]
+    Detect -->|Found| Extract[Text Extraction<br/>Tesseract + AI Model]
     
-    Blink --> AntiSpoof[Anti-Spoofing Analysis<br/>- Texture Analysis<br/>- 3D Depth<br/>- Motion Patterns]
-    Turn --> AntiSpoof
-    Smile --> AntiSpoof
+    Extract --> Parse[Parse Fields<br/>• ID Number<br/>• Name, DOB<br/>• Address]
     
-    AntiSpoof --> Score{Liveness Score}
-    Score -->|> 90%| Pass[Pass]
-    Score -->|< 90%| Fail[Fail]
+    Parse --> Validate{Field<br/>Validation}
+    Validate -->|Invalid| Error2[400: Incomplete Data]
+    Validate -->|Valid| FaceDetect[Face Detection<br/>from Photo]
+    
+    FaceDetect --> Quality{Image<br/>Quality Check}
+    Quality -->|Poor| Error3[400: Low Quality]
+    Quality -->|Good| Success[200 OK + Extracted Data]
+    
+    style Error1 fill:#f44336,color:#fff
+    style Error2 fill:#f44336,color:#fff
+    style Error3 fill:#f44336,color:#fff
+    style Success fill:#4caf50,color:#fff
 ```
-
-**Liveness Methods:**
-
-| Method | Mô Tả | Độ An Toàn | Trải Nghiệm |
-|--------|-------|------------|-------------|
-| **Passive** | Phân tích ảnh tĩnh | Thấp | Tốt nhất |
-| **Active** | Yêu cầu hành động (chớp mắt, quay đầu) | Trung bình | Tốt |
-| **Hybrid** | Kết hợp Passive + Active | Cao | Chấp nhận được |
 
 **Request:**
 ```json
 {
-  "LivenessMethod": "ACTIVE",
-  "VideoData": "base64_encoded_video",
-  "VideoFormat": "MP4",
-  "RequiredActions": ["BLINK", "TURN_LEFT", "TURN_RIGHT"]
+  "FrontImage": "base64_encoded_image",
+  "BackImage": "base64_encoded_image",
+  "DocumentType": "CCCD"
 }
 ```
 
 **Response:**
 ```json
 {
-  "Data": {
-    "LivenessScore": 0.95,
-    "Status": "PASS",
-    "DetectedActions": {
-      "BLINK": true,
-      "TURN_LEFT": true,
-      "TURN_RIGHT": true
-    },
-    "SpoofingIndicators": {
-      "PrintedPhoto": 0.02,
-      "DigitalScreen": 0.01,
-      "Mask": 0.00
-    },
-    "BestFrameImage": "base64_encoded_best_frame"
-  }
+  "OCRId": "ocr-789012",
+  "ExtractedData": {
+    "IdNumber": "001099001234",
+    "FullName": "NGUYEN VAN A",
+    "DateOfBirth": "01/01/1990",
+    "Gender": "Male",
+    "Nationality": "Vietnam",
+    "PlaceOfOrigin": "Hanoi",
+    "PlaceOfResidence": "123 Nguyen Hue, District 1, HCMC",
+    "IssueDate": "01/01/2020",
+    "ExpiryDate": "01/01/2035"
+  },
+  "Confidence": {
+    "Overall": 0.95,
+    "IdNumber": 0.98,
+    "FullName": 0.93,
+    "DateOfBirth": 0.96
+  },
+  "FaceDetected": true,
+  "FaceBoundingBox": {
+    "x": 120,
+    "y": 80,
+    "width": 150,
+    "height": 180
+  },
+  "QualityScore": 88,
+  "ProcessedAt": "2025-12-15T10:31:00+07:00"
 }
 ```
 
 ### 3. Face Matching
 
-#### POST /v1/ekyc/face-match
+#### POST /v1/ekyc/face/match
+
+So khớp khuôn mặt selfie với ảnh trên CCCD.
 
 ```mermaid
 sequenceDiagram
-    participant API as eKYC API
-    participant FaceDetect as Face Detection
-    participant FeatureExtract as Feature Extraction
-    participant Compare as Similarity Comparison
-    participant Threshold as Threshold Check
+    participant User
+    participant App
+    participant eKYC
+    participant FaceAI as Face Recognition AI
+    participant Liveness
     
-    API->>FaceDetect: Detect Face in Image 1
-    API->>FaceDetect: Detect Face in Image 2
+    User->>App: Take Selfie
+    App->>App: Capture Multiple Frames
     
-    FaceDetect-->>FeatureExtract: Face Bounding Boxes
-    FeatureExtract->>FeatureExtract: Extract 128D Embeddings
+    App->>eKYC: POST /face/match<br/>+ Selfie Image<br/>+ CCCD Photo
     
-    FeatureExtract-->>Compare: Embedding Vector 1
-    FeatureExtract-->>Compare: Embedding Vector 2
+    eKYC->>Liveness: Check Liveness<br/>(Anti-spoofing)
+    Liveness->>Liveness: Analyze:<br/>• Eye blinking<br/>• Head movement<br/>• Skin texture
     
-    Compare->>Compare: Calculate Cosine Similarity
-    Compare-->>Threshold: Similarity Score
-    
-    Threshold->>Threshold: Check Threshold (0.8)
-    Threshold-->>API: Match Result + Score
-```
-
-**Request:**
-```json
-{
-  "SourceImage": "base64_encoded_id_photo",
-  "TargetImage": "base64_encoded_selfie",
-  "Threshold": 0.80
-}
-```
-
-**Response:**
-```json
-{
-  "Data": {
-    "SimilarityScore": 0.92,
-    "IsMatch": true,
-    "Confidence": "HIGH",
-    "FaceQuality": {
-      "SourceImage": {
-        "Brightness": 0.85,
-        "Sharpness": 0.90,
-        "FaceSize": "ADEQUATE"
-      },
-      "TargetImage": {
-        "Brightness": 0.88,
-        "Sharpness": 0.92,
-        "FaceSize": "ADEQUATE"
-      }
-    }
-  }
-}
-```
-
-## NFC CCCD Verification (QĐ 2345)
-
-### NFC Chip Reading Flow
-
-```mermaid
-sequenceDiagram
-    participant User as User
-    participant App as Mobile App
-    participant NFC_SDK as NFC SDK
-    participant API as Bank API
-    participant MPS as Ministry of Public Security
-    
-    Note over User,App: Step 1: Prepare
-    User->>App: Initiate NFC Scan
-    App->>User: Request CCCD Info<br/>(ID Number + DOB + Expiry)
-    User->>App: Enter Info (for BAC)
-    
-    Note over User,NFC_SDK: Step 2: NFC Reading
-    App->>NFC_SDK: Initialize NFC Session
-    User->>NFC_SDK: Tap CCCD to Phone
-    
-    NFC_SDK->>NFC_SDK: Basic Access Control (BAC)<br/>using ID + DOB + Expiry
-    NFC_SDK->>NFC_SDK: Read DG1 (MRZ Data)
-    NFC_SDK->>NFC_SDK: Read DG2 (Face Image)
-    NFC_SDK->>NFC_SDK: Read SOD (Security Object)
-    
-    Note over NFC_SDK: Step 3: Active Authentication
-    NFC_SDK->>NFC_SDK: Challenge Chip
-    NFC_SDK->>NFC_SDK: Verify Chip Signature
-    
-    NFC_SDK-->>App: Chip Data + Signature
-    
-    Note over App,MPS: Step 4: Verify with MPS
-    App->>API: POST /ekyc/nfc-verify<br/>+ Chip Data + SOD
-    API->>API: Verify SOD Signature
-    API->>MPS: Validate Certificate Chain
-    MPS-->>API: Certificate Valid
-    
-    API->>API: Extract Personal Info from DG1
-    API->>API: Extract Face from DG2
-    API->>API: Compare with Existing Data
-    
-    API-->>App: Verification Result<br/>+ Personal Info
-```
-
-### NFC Data Groups
-
-```mermaid
-graph TB
-    subgraph "CCCD Chip Data"
-        DG1[DG1: MRZ Data<br/>- ID Number<br/>- Name<br/>- DOB<br/>- Nationality]
+    alt Not Live
+        Liveness-->>eKYC: Spoofing Detected
+        eKYC-->>App: 400: Liveness Check Failed
+    else Live Person
+        Liveness-->>eKYC: Live Person Confirmed
         
-        DG2[DG2: Face Image<br/>- JPEG format<br/>- High quality]
+        eKYC->>FaceAI: Compare Faces<br/>Deep Learning Model
+        FaceAI->>FaceAI: Extract Features<br/>512-dim Vectors
+        FaceAI->>FaceAI: Calculate Similarity<br/>Cosine Distance
         
-        DG13[DG13: Optional Data<br/>- Additional info]
-        
-        SOD[SOD: Security Object<br/>- Digital Signature<br/>- Hash of all DGs]
-        
-        COM[COM: Common Data<br/>- Available DGs list]
-    end
-    
-    subgraph "Security"
-        BAC[Basic Access Control<br/>Key derived from:<br/>ID + DOB + Expiry]
-        
-        AA[Active Authentication<br/>Chip proves it's genuine]
-        
-        PA[Passive Authentication<br/>Verify SOD signature]
-    end
-    
-    BAC --> DG1
-    BAC --> DG2
-    BAC --> DG13
-    BAC --> SOD
-    
-    SOD --> PA
-    DG1 --> AA
-```
-
-### API Endpoint: NFC Verification
-
-#### POST /v1/ekyc/nfc-verify
-
-**Request:**
-```json
-{
-  "ChipData": {
-    "DG1": "base64_encoded_mrz_data",
-    "DG2": "base64_encoded_face_image",
-    "SOD": "base64_encoded_security_object",
-    "ActiveAuthSignature": "base64_encoded_aa_signature"
-  },
-  "DeviceInfo": {
-    "DeviceModel": "iPhone 15 Pro",
-    "OSVersion": "iOS 17.2",
-    "NFCCapability": true
-  }
-}
-```
-
-**Response:**
-```json
-{
-  "Data": {
-    "VerificationStatus": "VERIFIED",
-    "ChipAuthenticity": "GENUINE",
-    "CertificateValidation": {
-      "Status": "VALID",
-      "IssuerCountry": "VN",
-      "IssuerOrganization": "Ministry of Public Security"
-    },
-    "PersonalInfo": {
-      "IDNumber": "001234567890",
-      "FullName": "NGUYEN VAN A",
-      "DateOfBirth": "01/01/1990",
-      "Gender": "M",
-      "Nationality": "VNM",
-      "DocumentNumber": "A12345678",
-      "ExpiryDate": "01/01/2035"
-    },
-    "BiometricData": {
-      "FaceImage": "base64_encoded_face_from_chip",
-      "FaceQuality": 0.95
-    },
-    "VerificationTimestamp": "2024-12-10T18:45:00+07:00",
-    "eKYCReferenceId": "ekyc-nfc-12345"
-  }
-}
-```
-
-## Complete eKYC Journey
-
-```mermaid
-stateDiagram-v2
-    [*] --> DocumentCapture: Start eKYC
-    DocumentCapture --> OCRProcessing: Images captured
-    OCRProcessing --> LivenessCheck: OCR success
-    OCRProcessing --> DocumentCapture: OCR failed (retry)
-    
-    LivenessCheck --> FaceMatching: Liveness passed
-    LivenessCheck --> LivenessCheck: Liveness failed (retry)
-    
-    FaceMatching --> AMLCheck: Face matched
-    FaceMatching --> Failed: Face not matched
-    
-    AMLCheck --> NFCVerification: AML clear
-    AMLCheck --> Failed: Sanction hit
-    
-    NFCVerification --> Completed: NFC verified (Level 4)
-    NFCVerification --> Completed: Skip NFC (Level 3)
-    NFCVerification --> NFCVerification: NFC failed (retry)
-    
-    Completed --> [*]
-    Failed --> [*]
-    
-    note right of NFCVerification
-        NFC required for:
-        - Credit card issuance
-        - High-value transactions
-        - Account opening
-    end note
-```
-
-## Authentication Levels (QĐ 2345)
-
-```mermaid
-graph TB
-    subgraph "Level 1: Basic"
-        L1_User[Username]
-        L1_Pass[Password]
-        L1_User --> L1_Pass
-    end
-    
-    subgraph "Level 2: Two-Factor"
-        L2_Pass[Password]
-        L2_OTP[SMS/Email OTP]
-        L2_Pass --> L2_OTP
-    end
-    
-    subgraph "Level 3: Biometric"
-        L3_Bio[Fingerprint/FaceID]
-        L3_Device[Trusted Device]
-        L3_Bio --> L3_Device
-    end
-    
-    subgraph "Level 4: Enhanced"
-        L4_NFC[NFC CCCD Verification]
-        L4_Face[Face Match with Chip]
-        L4_Liveness[Liveness Detection]
-        L4_NFC --> L4_Face
-        L4_Face --> L4_Liveness
-    end
-    
-    L1_Pass --> L2_Pass
-    L2_OTP --> L3_Bio
-    L3_Device --> L4_NFC
-    
-    style L4_NFC fill:#ff6b6b
-    style L4_Face fill:#ff6b6b
-    style L4_Liveness fill:#ff6b6b
-```
-
-### Use Cases by Level
-
-| Giao Dịch | Giá Trị | Level Yêu Cầu |
-|-----------|---------|---------------|
-| Tra cứu số dư | N/A | Level 2 |
-| Chuyển tiền nội bộ | < 2M VND | Level 2 |
-| Chuyển tiền nội bộ | 2M - 10M VND | Level 3 |
-| Chuyển tiền liên ngân hàng | < 10M VND | Level 3 |
-| Chuyển tiền liên ngân hàng | ≥ 10M VND | Level 4 |
-| Mở tài khoản | N/A | Level 4 |
-| Phát hành thẻ tín dụng | N/A | Level 4 |
-| Thay đổi hạn mức thẻ | N/A | Level 4 |
-
-## OTP Service
-
-### OTP Generation & Validation
-
-```mermaid
-sequenceDiagram
-    participant User as User
-    participant App as App
-    participant API as OTP API
-    participant Generator as OTP Generator
-    participant SMS as SMS Gateway
-    participant Cache as Redis Cache
-    
-    User->>App: Request OTP
-    App->>API: POST /auth/otp/generate<br/>+ Phone Number
-    
-    API->>Generator: Generate 6-digit OTP
-    Generator->>Generator: Random + Timestamp
-    Generator-->>API: OTP Code
-    
-    API->>Cache: Store OTP<br/>Key: phone + purpose<br/>TTL: 5 minutes
-    API->>SMS: Send OTP via SMS
-    SMS-->>User: SMS with OTP
-    
-    API-->>App: 200 OK<br/>OTP Sent
-    
-    Note over User,App: User enters OTP
-    
-    User->>App: Enter OTP
-    App->>API: POST /auth/otp/validate<br/>+ Phone + OTP
-    
-    API->>Cache: Retrieve stored OTP
-    Cache-->>API: Stored OTP + Attempts
-    
-    alt OTP Match
-        API->>Cache: Delete OTP
-        API-->>App: 200 OK<br/>OTP Valid
-    else OTP Mismatch
-        API->>Cache: Increment Attempts
-        alt Attempts < 3
-            API-->>App: 400 Invalid OTP<br/>Retry
-        else Attempts >= 3
-            API->>Cache: Block Phone (15 mins)
-            API-->>App: 429 Too Many Attempts
+        alt Match (Similarity > 0.85)
+            FaceAI-->>eKYC: Match: 92%
+            eKYC-->>App: 200 OK: Face Matched
+        else No Match
+            FaceAI-->>eKYC: No Match: 65%
+            eKYC-->>App: 400: Face Mismatch
         end
     end
 ```
 
-### Smart OTP (Push Notification)
-
-```mermaid
-sequenceDiagram
-    participant User as User
-    participant BankApp as Bank App
-    participant API as API
-    participant Push as Push Service
-    
-    Note over User,API: Transaction initiated
-    
-    API->>Push: Send Push Notification<br/>+ Transaction Details
-    Push->>BankApp: Push to User's Device
-    
-    BankApp->>User: Show Notification<br/>"Approve transaction?"
-    
-    alt User Approves
-        User->>BankApp: Tap Approve
-        BankApp->>BankApp: Biometric Auth
-        BankApp->>API: POST /auth/smart-otp/approve<br/>+ Session ID
-        API-->>BankApp: Approved
-    else User Denies
-        User->>BankApp: Tap Deny
-        BankApp->>API: POST /auth/smart-otp/deny
-        API-->>BankApp: Denied
-    end
-```
-
-## Data Security & Privacy
-
-### PII Encryption
-
-```mermaid
-graph TB
-    subgraph "Data at Rest"
-        PII[Personal Identifiable Information]
-        Encrypt[AES-256 Encryption]
-        KMS[Key Management Service]
-        Vault[(Encrypted Vault)]
-        
-        PII --> Encrypt
-        KMS --> Encrypt
-        Encrypt --> Vault
-    end
-    
-    subgraph "Data in Transit"
-        API[API Request]
-        TLS[TLS 1.3]
-        Server[Server]
-        
-        API --> TLS
-        TLS --> Server
-    end
-    
-    subgraph "Data in Use"
-        Memory[In-Memory Processing]
-        Mask[Data Masking]
-        Log[Audit Logs]
-        
-        Memory --> Mask
-        Mask --> Log
-    end
-```
-
-### Data Retention
-
-| Data Type | Retention Period | Storage |
-|-----------|------------------|---------|
-| ID Card Images | 5 years | Encrypted vault |
-| Face Images | 5 years | Encrypted vault |
-| eKYC Results | 5 years | Database (encrypted) |
-| Audit Logs | 3 months (hot) + 1 year (cold) | Log storage |
-| Biometric Templates | Until account closure | HSM |
-| NFC Chip Data | 5 years | Encrypted vault |
-
-## Compliance & Standards
-
-### GDPR/Nghị định 13/2023 Compliance
-
-```mermaid
-graph LR
-    subgraph "User Rights"
-        Access[Right to Access]
-        Rectify[Right to Rectify]
-        Erase[Right to Erasure]
-        Port[Right to Portability]
-    end
-    
-    subgraph "Implementation"
-        API_Access[GET /users/me/kyc-data]
-        API_Update[PUT /users/me/kyc-data]
-        API_Delete[DELETE /users/me/kyc-data]
-        API_Export[GET /users/me/data-export]
-    end
-    
-    Access --> API_Access
-    Rectify --> API_Update
-    Erase --> API_Delete
-    Port --> API_Export
-```
-
-### ISO 30107 (Liveness Detection)
-
-- **Part 1**: Framework
-- **Part 2**: Data formats
-- **Part 3**: Testing and reporting
-
-### ISO 19794 (Biometric Data)
-
-- **Part 5**: Face image data
-- **Part 6**: Iris image data
-
-## Error Handling
-
-| Error Code | Mô Tả | HTTP Code | Retry? |
-|------------|-------|-----------|--------|
-| `OCR_FAILED` | Không đọc được thông tin | 422 | Yes |
-| `LIVENESS_FAILED` | Phát hiện giả mạo | 422 | Yes (max 3) |
-| `FACE_NOT_MATCHED` | Khuôn mặt không khớp | 422 | No |
-| `NFC_READ_ERROR` | Lỗi đọc chip NFC | 422 | Yes |
-| `CERTIFICATE_INVALID` | Chứng thư không hợp lệ | 422 | No |
-| `SANCTION_HIT` | Trong danh sách đen | 403 | No |
-| `DOCUMENT_EXPIRED` | Giấy tờ hết hạn | 422 | No |
-| `POOR_IMAGE_QUALITY` | Chất lượng ảnh kém | 400 | Yes |
-
-## Best Practices
-
-### Image Quality Requirements
-
+**Request:**
 ```json
 {
-  "MinimumResolution": "1280x720",
-  "MaxFileSize": "5MB",
-  "AcceptedFormats": ["JPEG", "PNG"],
-  "MinBrightness": 0.3,
-  "MaxBrightness": 0.9,
-  "MinSharpness": 0.5,
-  "FaceMinSize": "200x200 pixels"
+  "SelfieImage": "base64_encoded_selfie",
+  "ReferenceImage": "base64_encoded_cccd_photo",
+  "LivenessCheck": true,
+  "LivenessFrames": [
+    "base64_frame1",
+    "base64_frame2",
+    "base64_frame3"
+  ]
 }
 ```
 
-### Anti-Fraud Measures
+**Response:**
+```json
+{
+  "MatchId": "match-345678",
+  "IsMatch": true,
+  "Similarity": 0.92,
+  "Threshold": 0.85,
+  "LivenessScore": 0.96,
+  "LivenessPassed": true,
+  "Confidence": "High",
+  "MatchedAt": "2025-12-15T10:32:00+07:00"
+}
+```
 
-- Device fingerprinting
-- IP geolocation check
-- Velocity checks (max 3 attempts/hour)
-- Behavioral biometrics
-- Document forensics (detect photoshop)
+### 4. Liveness Detection
+
+#### POST /v1/ekyc/liveness/check
+
+Phát hiện khuôn mặt thật (chống giả mạo bằng ảnh/video).
+
+```mermaid
+graph TB
+    subgraph "Liveness Detection Methods"
+        Passive[Passive Liveness<br/>• Texture analysis<br/>• Light reflection<br/>• Depth estimation]
+        
+        Active[Active Liveness<br/>• Head turn<br/>• Eye blink<br/>• Smile detection]
+        
+        Challenge[Challenge-Response<br/>• Random number display<br/>• Follow moving dot<br/>• Read random text]
+    end
+    
+    subgraph "Anti-Spoofing Checks"
+        Photo[Photo Attack<br/>Detection]
+        Video[Video Replay<br/>Detection]
+        Mask[3D Mask<br/>Detection]
+        Screen[Screen Display<br/>Detection]
+    end
+    
+    Passive --> Photo
+    Passive --> Screen
+    Active --> Video
+    Challenge --> Mask
+    
+    Photo --> Score[Liveness Score<br/>0.0 - 1.0]
+    Video --> Score
+    Mask --> Score
+    Screen --> Score
+    
+    Score -->|> 0.9| Pass[✓ Live Person]
+    Score -->|< 0.9| Fail[✗ Spoofing Detected]
+    
+    style Pass fill:#4caf50,color:#fff
+    style Fail fill:#f44336,color:#fff
+```
+
+**Liveness Techniques:**
+
+| Technique | Description | Spoofing Prevention |
+|-----------|-------------|---------------------|
+| **Texture Analysis** | Analyze skin texture, pores | Photo attacks |
+| **Light Reflection** | Detect screen reflection | Screen display |
+| **Depth Estimation** | 3D face structure | 2D photos |
+| **Eye Blinking** | Detect natural blinks | Static photos |
+| **Head Movement** | Track head rotation | Photo/Video |
+| **Moiré Pattern** | Screen pixel pattern | Screen attacks |
+
+### 5. Risk Scoring
+
+#### POST /v1/ekyc/risk/score
+
+Đánh giá tổng hợp rủi ro dựa trên nhiều yếu tố.
+
+```mermaid
+graph TB
+    subgraph "Risk Factors"
+        F1[Document Authenticity<br/>Weight: 30%]
+        F2[Face Match Quality<br/>Weight: 25%]
+        F3[Liveness Score<br/>Weight: 20%]
+        F4[Blacklist Check<br/>Weight: 15%]
+        F5[Behavioral Analysis<br/>Weight: 10%]
+    end
+    
+    subgraph "Risk Calculation"
+        Calc[Weighted Score<br/>Calculation]
+    end
+    
+    subgraph "Risk Levels"
+        Low[Low Risk<br/>80-100<br/>Auto Approve]
+        Medium[Medium Risk<br/>50-79<br/>Manual Review]
+        High[High Risk<br/>0-49<br/>Reject]
+    end
+    
+    F1 --> Calc
+    F2 --> Calc
+    F3 --> Calc
+    F4 --> Calc
+    F5 --> Calc
+    
+    Calc --> Low
+    Calc --> Medium
+    Calc --> High
+    
+    style Low fill:#4caf50,color:#fff
+    style Medium fill:#ff9800
+    style High fill:#f44336,color:#fff
+```
+
+**Risk Score Breakdown:**
+
+```json
+{
+  "RiskId": "risk-901234",
+  "OverallScore": 85,
+  "RiskLevel": "Low",
+  "Factors": {
+    "DocumentAuthenticity": {
+      "Score": 95,
+      "Weight": 0.30,
+      "Checks": {
+        "NFCSignature": "Valid",
+        "HologramPresent": true,
+        "MicroPrint": "Verified"
+      }
+    },
+    "FaceMatchQuality": {
+      "Score": 92,
+      "Weight": 0.25,
+      "Similarity": 0.92
+    },
+    "LivenessScore": {
+      "Score": 96,
+      "Weight": 0.20,
+      "Method": "Passive + Active"
+    },
+    "BlacklistCheck": {
+      "Score": 100,
+      "Weight": 0.15,
+      "Found": false
+    },
+    "BehavioralAnalysis": {
+      "Score": 70,
+      "Weight": 0.10,
+      "Factors": {
+        "DeviceReputation": "Good",
+        "LocationConsistency": "High",
+        "TimePattern": "Normal"
+      }
+    }
+  },
+  "Recommendation": "Approve",
+  "ReviewRequired": false,
+  "ComputedAt": "2025-12-15T10:33:00+07:00"
+}
+```
+
+## Data Flow
+
+### Complete eKYC Journey
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant App
+    participant Gateway
+    participant NFC as NFC Service
+    participant OCR as OCR Service
+    participant Face as Face Service
+    participant Risk as Risk Engine
+    participant Result
+    
+    Note over User,Result: Step 1: NFC Verification
+    User->>App: Tap CCCD
+    App->>Gateway: NFC Data
+    Gateway->>NFC: Verify Chip
+    NFC-->>Gateway: NFC Result (Score: 95)
+    
+    Note over User,Result: Step 2: OCR Backup
+    User->>App: Take Photos
+    App->>Gateway: Front + Back Images
+    Gateway->>OCR: Process Images
+    OCR-->>Gateway: OCR Result (Score: 88)
+    
+    Note over User,Result: Step 3: Face Matching
+    User->>App: Take Selfie + Liveness
+    App->>Gateway: Selfie + Frames
+    Gateway->>Face: Match & Check Liveness
+    Face-->>Gateway: Face Result (Score: 92)
+    
+    Note over User,Result: Step 4: Risk Assessment
+    Gateway->>Risk: Calculate Final Risk
+    Risk->>Risk: Blacklist Check
+    Risk->>Risk: Behavioral Analysis
+    Risk-->>Gateway: Risk Score: 85/100
+    
+    Gateway->>Result: Store Results
+    Result-->>App: eKYC Complete<br/>Status: Approved
+    App-->>User: ✓ Verification Successful
+```
+
+## Security & Privacy
+
+### Data Protection
+
+```mermaid
+graph TB
+    subgraph "Data Collection"
+        Collect[User submits:<br/>• CCCD images<br/>• Selfie<br/>• NFC data]
+    end
+    
+    subgraph "Encryption in Transit"
+        TLS[TLS 1.3<br/>End-to-end Encryption]
+    end
+    
+    subgraph "Processing"
+        Process[Server-side Processing<br/>• OCR<br/>• Face recognition<br/>• Risk scoring]
+    end
+    
+    subgraph "Encryption at Rest"
+        Storage[AES-256 Encryption<br/>S3 Server-side Encryption]
+    end
+    
+    subgraph "Data Retention"
+        Retention[Retention Policy<br/>• Active: 90 days<br/>• Archive: 7 years<br/>• Auto-delete after]
+    end
+    
+    subgraph "Access Control"
+        Access[Strict Access Control<br/>• RBAC<br/>• Audit logs<br/>• MFA required]
+    end
+    
+    Collect --> TLS
+    TLS --> Process
+    Process --> Storage
+    Storage --> Retention
+    Storage --> Access
+    
+    style TLS fill:#4caf50,color:#fff
+    style Storage fill:#ff9800
+    style Access fill:#f44336,color:#fff
+```
+
+**Privacy Compliance:**
+
+- ✅ Nghị định 13/2023 (PDPA Vietnam)
+- ✅ GDPR principles applied
+- ✅ Explicit consent required
+- ✅ Right to erasure supported
+- ✅ Data minimization practiced
+- ✅ Purpose limitation enforced
+
+### Audit Logging
+
+```json
+{
+  "EventId": "ekyc-evt-123456",
+  "EventType": "eKYC.Verification",
+  "Timestamp": "2025-12-15T10:30:00+07:00",
+  "UserId": "user-abc123",
+  "TPPId": "tpp-xyz789",
+  "Actions": [
+    {
+      "Action": "NFC.Verify",
+      "Status": "Success",
+      "Duration": 1250,
+      "RiskScore": 95
+    },
+    {
+      "Action": "OCR.Process",
+      "Status": "Success",
+      "Duration": 2100,
+      "Confidence": 88
+    },
+    {
+      "Action": "Face.Match",
+      "Status": "Success",
+      "Duration": 850,
+      "Similarity": 92
+    },
+    {
+      "Action": "Risk.Calculate",
+      "Status": "Success",
+      "FinalScore": 85,
+      "Decision": "Approved"
+    }
+  ],
+  "DeviceInfo": {
+    "DeviceId": "device-001",
+    "Platform": "iOS",
+    "Location": "10.7769,106.7009"
+  },
+  "DataRetention": {
+    "ImagesStored": true,
+    "RetentionPeriod": "90 days",
+    "AutoDeleteDate": "2026-03-15"
+  }
+}
+```
+
+## Performance & SLA
+
+**Target Metrics:**
+
+| Service | Response Time (P95) | Accuracy | Uptime |
+|---------|---------------------|----------|--------|
+| NFC Verification | < 2s | 99.5% | 99.9% |
+| OCR Document | < 3s | 95%+ | 99.9% |
+| Face Matching | < 1s | 98%+ | 99.9% |
+| Liveness Detection | < 1.5s | 97%+ | 99.9% |
+| Risk Scoring | < 500ms | N/A | 99.9% |
+
+## Error Handling
+
+| Error Code | Mô Tả | Action |
+|------------|-------|--------|
+| `NFC_READ_FAILED` | Không đọc được chip | Thử lại hoặc dùng OCR |
+| `DOCUMENT_INVALID` | CCCD không hợp lệ | Kiểm tra ảnh chụp |
+| `FACE_NOT_DETECTED` | Không phát hiện khuôn mặt | Chụp lại trong điều kiện sáng tốt |
+| `LIVENESS_FAILED` | Phát hiện giả mạo | Yêu cầu xác thực trực tiếp |
+| `SIMILARITY_LOW` | Khuôn mặt không khớp | Kiểm tra lại danh tính |
+| `BLACKLIST_FOUND` | Tìm thấy trong blacklist | Từ chối giao dịch |
+| `RATE_LIMIT_EXCEEDED` | Vượt giới hạn yêu cầu | Chờ và thử lại |
+
+## Compliance Checklist
+
+- [ ] Circular 45/2025 compliance (biometric auth)
+- [ ] Quyết định 2345/QĐ-NHNN (CCCD chip standards)
+- [ ] ISO 30107 liveness detection
+- [ ] Nghị định 13/2023 data protection
+- [ ] AES-256 encryption at rest
+- [ ] TLS 1.3 for data in transit
+- [ ] Audit logs retained 7 years
+- [ ] Consent management implemented
+- [ ] Right to erasure supported
+- [ ] Regular security audits conducted
 
 ## Tài Liệu Tham Khảo
-- Quyết định 2345/QĐ-NHNN
-- Nghị định 13/2023/NĐ-CP (Data Protection)
-- ISO 30107 (Liveness Detection)
-- ISO 19794 (Biometric Data Formats)
-- ICAO Doc 9303 (Machine Readable Travel Documents)
-- NIST SP 800-63B (Digital Identity Guidelines)
+
+- **Thông tư 64/2024/TT-NHNN** - Open API
+- **Circular 45/2025/TT-NHNN** - Biometric Authentication
+- **Quyết định 2345/QĐ-NHNN** - CCCD Standards
+- **Nghị định 13/2023/NĐ-CP** - Data Protection
+- **ISO 30107** - Liveness Detection Standards
+- **ISO 19794** - Biometric Data Formats
+
+---
+
+**Phiên bản:** 1.0  
+**Ngày cập nhật:** 15/12/2025  
+**Trạng thái:** Production Ready

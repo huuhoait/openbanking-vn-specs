@@ -1,666 +1,569 @@
-# Dịch Vụ Thẻ & Tokenization
+# Dịch Vụ Thẻ & Tokenization (Card Services & Token Provisioning)
+
+> **Tuân thủ:** Thông tư 64/2024/TT-NHNN | ISO/IEC 11568 | EMV Payment Tokenization | PCI DSS 4.0
 
 ## Tổng Quan
 
-Nhóm API quản lý vòng đời thẻ (Card Lifecycle) và tích hợp với các ví điện tử (Apple Pay, Google Pay, Samsung Pay) thông qua Push Provisioning.
+Nhóm API cho phép TPP phát hành thẻ, quản lý vòng đời thẻ và tokenization cho thanh toán không tiếp xúc (NFC/Mobile Wallet).
+
+### Phạm Vi Dịch Vụ
+
+1. **Card Issuance**: Phát hành thẻ tín dụng/ghi nợ
+2. **Card Lifecycle**: Kích hoạt, khóa, mở khóa, hủy thẻ
+3. **Card Tokenization**: Chuyển đổi PAN sang Token
+4. **NFC Push Provisioning**: Đẩy thẻ lên Apple Pay, Google Pay, Samsung Pay
+5. **Card Controls**: Giới hạn giao dịch, khu vực địa lý
 
 ## Kiến Trúc Card Services
 
 ```mermaid
 graph TB
-    subgraph "TPP/Wallet Layer"
+    subgraph "TPP Layer"
         TPP[TPP Application]
-        ApplePay[Apple Wallet]
+    end
+    
+    subgraph "API Gateway + Security"
+        Gateway[API Gateway]
+        JWS[JWS Verification]
+        mTLS[mTLS Authentication]
+    end
+    
+    subgraph "Card Services"
+        Issuance[Card Issuance Service]
+        Lifecycle[Lifecycle Management]
+        Tokenization[Tokenization Service]
+        Provisioning[NFC Provisioning]
+    end
+    
+    subgraph "Token Service Provider"
+        TSP[Token Service Provider<br/>Visa/Mastercard]
+        HSM[Hardware Security Module]
+    end
+    
+    subgraph "Card System"
+        CardCore[Card Management System]
+        CardDB[(Card Database)]
+    end
+    
+    subgraph "Mobile Wallets"
+        ApplePay[Apple Pay]
         GooglePay[Google Pay]
         SamsungPay[Samsung Pay]
     end
     
-    subgraph "API Layer"
-        CardAPI[Card Management API]
-        TokenAPI[Tokenization API]
-    end
+    TPP --> Gateway
+    Gateway --> JWS
+    JWS --> mTLS
     
-    subgraph "Card Service"
-        Issuance[Card Issuance Service]
-        Lifecycle[Lifecycle Management]
-        TokenMgmt[Token Management]
-    end
-    
-    subgraph "Token Service Providers"
-        VTS[Visa Token Service]
-        MDES[Mastercard MDES]
-    end
-    
-    subgraph "Core Systems"
-        CardCore[Card Management System]
-        HSM[Hardware Security Module]
-    end
-    
-    TPP --> CardAPI
-    ApplePay --> TokenAPI
-    GooglePay --> TokenAPI
-    SamsungPay --> TokenAPI
-    
-    CardAPI --> Issuance
-    CardAPI --> Lifecycle
-    TokenAPI --> TokenMgmt
-    
-    TokenMgmt --> VTS
-    TokenMgmt --> MDES
+    mTLS --> Issuance
+    mTLS --> Lifecycle
+    mTLS --> Tokenization
+    mTLS --> Provisioning
     
     Issuance --> CardCore
     Lifecycle --> CardCore
-    TokenMgmt --> HSM
-    CardCore --> HSM
-```
-
-## Card Issuance Flow
-
-```mermaid
-sequenceDiagram
-    participant User as End User
-    participant TPP as TPP App
-    participant API as Card API
-    participant eKYC as eKYC Service
-    participant Credit as Credit Scoring
-    participant CardCore as Card Core System
-    participant HSM as HSM
+    Tokenization --> TSP
+    Tokenization --> HSM
+    Provisioning --> TSP
     
-    User->>TPP: Request New Card
-    TPP->>API: POST /cards/issuance<br/>+ eKYC Reference
+    CardCore --> CardDB
     
-    API->>eKYC: Validate eKYC Status
-    eKYC-->>API: eKYC Verified
+    Provisioning --> ApplePay
+    Provisioning --> GooglePay
+    Provisioning --> SamsungPay
     
-    API->>Credit: Check Credit Score
-    Credit-->>API: Score + Approved Limit
-    
-    alt Credit Approved
-        API->>CardCore: Create Card Record
-        CardCore->>HSM: Generate Card Number (PAN)
-        HSM-->>CardCore: Encrypted PAN
-        CardCore->>HSM: Generate CVV
-        HSM-->>CardCore: CVV
-        CardCore->>CardCore: Set Expiry Date
-        CardCore-->>API: Card Details
-        
-        API->>API: Create Virtual Card
-        API-->>TPP: 201 Created<br/>Virtual Card Details
-        
-        Note over API,CardCore: Physical card production<br/>queued in background
-    else Credit Rejected
-        API-->>TPP: 403 Forbidden<br/>Credit check failed
-    end
-```
-
-## Card Lifecycle Management
-
-```mermaid
-stateDiagram-v2
-    [*] --> Issued: Card created
-    Issued --> Active: Activated by user
-    Issued --> Expired: Not activated (30 days)
-    
-    Active --> Locked: User locks card
-    Active --> Blocked: Fraud detected
-    Active --> Expired: Expiry date reached
-    
-    Locked --> Active: User unlocks
-    Locked --> Blocked: Admin blocks
-    
-    Blocked --> Active: Admin unblocks
-    
-    Active --> Closed: User closes account
-    Blocked --> Closed: Permanent closure
-    Expired --> Closed: Not renewed
-    
-    Closed --> [*]
+    style HSM fill:#f44336,stroke:#c62828,color:#fff
+    style TSP fill:#ff9800,stroke:#e65100
 ```
 
 ## API Endpoints
 
 ### 1. Card Issuance
 
-#### POST /v1/cards/issuance
+#### POST /v1/cards/issue
+
+Phát hành thẻ mới cho khách hàng.
+
+```mermaid
+sequenceDiagram
+    participant TPP
+    participant Gateway
+    participant CardSvc as Card Service
+    participant Consent as Consent Service
+    participant CardCore as Card System
+    participant TSP as Token Provider
+    
+    TPP->>Gateway: POST /cards/issue<br/>+ JWS Signature
+    Gateway->>Gateway: Verify JWS
+    Gateway->>CardSvc: Forward Request
+    
+    CardSvc->>Consent: Validate Consent<br/>Scope: cards:issue
+    Consent-->>CardSvc: Consent Valid
+    
+    CardSvc->>CardSvc: Validate Customer<br/>Credit Check
+    
+    alt Approved
+        CardSvc->>CardCore: Create Card Record
+        CardCore->>TSP: Generate PAN
+        TSP-->>CardCore: PAN + CVV
+        CardCore->>CardCore: Encrypt PAN
+        CardCore-->>CardSvc: Card Created
+        CardSvc-->>TPP: 201 Created<br/>CardId (masked)
+    else Rejected
+        CardSvc-->>TPP: 403 Forbidden<br/>Reason: Credit check failed
+    end
+```
 
 **Request:**
 ```json
 {
-  "Data": {
-    "ProductType": "VISA_PLATINUM",
-    "DeliveryAddress": {
-      "AddressLine": "123 Nguyen Hue",
-      "City": "Ho Chi Minh",
-      "PostCode": "700000",
-      "Country": "VN"
-    },
-    "eKYCReferenceId": "ekyc-ref-12345",
-    "LinkedAccount": "1234567890"
-  }
-}
-```
-
-**Response:**
-```json
-{
-  "Data": {
-    "CardId": "card-abc123",
-    "CardType": "Virtual",
-    "ProductType": "VISA_PLATINUM",
-    "Status": "Active",
-    "MaskedPAN": "4532********1234",
-    "ExpiryDate": "12/27",
-    "CardholderName": "NGUYEN VAN A",
-    "IssuedDate": "2024-12-10T18:00:00+07:00",
-    "VirtualCardDetails": {
-      "PAN": "4532123456781234",
-      "CVV": "123",
-      "ExpiryMonth": "12",
-      "ExpiryYear": "2027"
-    }
+  "CustomerId": "cust-12345",
+  "ProductCode": "VISA_CREDIT_PLATINUM",
+  "CardType": "Virtual",
+  "EmbossName": "NGUYEN VAN A",
+  "DeliveryAddress": {
+    "AddressLine": "123 Nguyen Hue",
+    "City": "Ho Chi Minh",
+    "PostalCode": "700000"
   },
-  "Links": {
-    "Self": "https://api.bank.vn/v1/cards/card-abc123"
+  "CreditLimit": {
+    "Amount": "50000000",
+    "Currency": "VND"
   }
-}
-```
-
-### 2. Card Lock/Unlock
-
-#### PUT /v1/cards/{CardId}/lock
-
-```mermaid
-sequenceDiagram
-    participant User as User
-    participant TPP as TPP App
-    participant API as Card API
-    participant CardCore as Card Core
-    participant Switch as Card Switch
-    
-    User->>TPP: Lock Card (Lost/Stolen)
-    TPP->>API: PUT /cards/{id}/lock<br/>Reason: LOST
-    
-    API->>CardCore: Update Card Status
-    CardCore->>Switch: Block Card on Network
-    Switch-->>CardCore: Blocked
-    CardCore-->>API: Status Updated
-    
-    API->>API: Send Push Notification
-    API-->>TPP: 200 OK
-    TPP-->>User: Card Locked Successfully
-    
-    Note over Switch: All transactions<br/>will be declined
-```
-
-**Request:**
-```json
-{
-  "Reason": "LOST",
-  "Comment": "Card lost at shopping mall"
 }
 ```
 
 **Response:**
-```json
-{
-  "Data": {
-    "CardId": "card-abc123",
-    "Status": "Locked",
-    "LockReason": "LOST",
-    "StatusUpdateDateTime": "2024-12-10T18:30:00+07:00"
-  }
-}
-```
-
-### 3. PIN Management
-
-#### PUT /v1/cards/{CardId}/pin
-
-```mermaid
-graph TB
-    Request[PIN Change Request]
-    
-    Request --> Validate{Validate Current PIN}
-    Validate -->|Invalid| Error[401 Invalid PIN]
-    Validate -->|Valid| CheckNew{Validate New PIN}
-    
-    CheckNew -->|Weak| Error2[400 PIN too weak]
-    CheckNew -->|Same as old| Error3[400 PIN must be different]
-    CheckNew -->|Valid| Encrypt[Encrypt PIN Block<br/>ISO 9564 Format]
-    
-    Encrypt --> HSM[Store in HSM]
-    HSM --> Success[200 OK]
-```
-
-**PIN Block Format (ISO 9564-1):**
-```
-Format 0: PIN + PAN
-Clear PIN: 1234
-PAN: 4532123456781234
-PIN Block: 0412FFFFFFFF (XOR with PAN)
-Encrypted with HSM key
-```
-
-**Request:**
-```json
-{
-  "CurrentPIN": "encrypted_current_pin",
-  "NewPIN": "encrypted_new_pin",
-  "EncryptionMethod": "RSA_OAEP"
-}
-```
-
-## Push Provisioning (Tokenization)
-
-### Architecture
-
-```mermaid
-graph TB
-    subgraph "User Device"
-        Wallet[Digital Wallet<br/>Apple/Google/Samsung]
-    end
-    
-    subgraph "Bank Systems"
-        API[Push Provisioning API]
-        TokenVault[Token Vault]
-        CardCore[Card Core]
-    end
-    
-    subgraph "Token Service Provider"
-        TSP[Visa VTS / MC MDES]
-    end
-    
-    subgraph "Payment Network"
-        Network[Visa/Mastercard Network]
-    end
-    
-    Wallet -->|1. Request Provisioning| API
-    API -->|2. Validate Card| CardCore
-    CardCore -->|3. Card Valid| API
-    API -->|4. Request Token| TSP
-    TSP -->|5. Generate DPAN| TSP
-    TSP -->|6. Return Token| API
-    API -->|7. Encrypt Token| TokenVault
-    TokenVault -->|8. Return OPC| API
-    API -->|9. Push to Wallet| Wallet
-    
-    Wallet -.->|Transaction| Network
-    Network -.->|Route via DPAN| TSP
-    TSP -.->|Detokenize to PAN| Network
-```
-
-### Push Provisioning Flow
-
-```mermaid
-sequenceDiagram
-    participant User as User
-    participant Wallet as Digital Wallet
-    participant Bank as Bank API
-    participant TSP as Token Service Provider
-    participant CardCore as Card Core
-    
-    User->>Wallet: Add Card to Wallet
-    Wallet->>Bank: POST /tokenization/provision<br/>+ Card Reference
-    
-    Bank->>CardCore: Validate Card Status
-    CardCore-->>Bank: Card Active
-    
-    Bank->>Bank: Generate Activation Code
-    Bank->>User: Send OTP via SMS
-    User->>Wallet: Enter OTP
-    Wallet->>Bank: Verify OTP
-    
-    Bank->>TSP: Request Token Provisioning<br/>+ Card Details
-    TSP->>TSP: Generate DPAN (Token)
-    TSP->>TSP: Create Token Cryptogram
-    TSP-->>Bank: Token + Cryptogram
-    
-    Bank->>Bank: Encrypt Token (OPC)
-    Bank-->>Wallet: Push OPC to Wallet
-    Wallet->>Wallet: Store Token Securely
-    Wallet-->>User: Card Added Successfully
-    
-    Note over Wallet,TSP: Card ready for<br/>contactless payments
-```
-
-### API Endpoint: Push Provisioning
-
-#### POST /v1/tokenization/provision
-
-**Request:**
 ```json
 {
   "CardId": "card-abc123",
-  "WalletProvider": "APPLE_PAY",
-  "DeviceInfo": {
-    "DeviceId": "device-xyz789",
-    "DeviceName": "iPhone 15 Pro",
-    "OSVersion": "iOS 17.2",
-    "WalletAccountId": "wallet-acc-456"
+  "MaskedPAN": "4111********1111",
+  "CardType": "Virtual",
+  "Status": "Inactive",
+  "ExpiryDate": "12/27",
+  "CardProduct": "VISA_CREDIT_PLATINUM",
+  "CreditLimit": {
+    "Amount": "50000000",
+    "Currency": "VND"
   },
-  "Certificates": {
-    "LeafCertificate": "-----BEGIN CERTIFICATE-----...",
-    "SubCACertificate": "-----BEGIN CERTIFICATE-----..."
-  },
-  "Nonce": "random-nonce-12345",
-  "NonceSignature": "signature-of-nonce"
+  "IssuedDate": "2025-12-15T10:30:00+07:00"
 }
 ```
 
-**Response:**
-```json
-{
-  "Data": {
-    "TokenReferenceId": "token-ref-12345",
-    "ActivationData": {
-      "EncryptedPassData": "encrypted_opaque_payment_card",
-      "EphemeralPublicKey": "BFz...public_key",
-      "ActivationMethod": "SMS_OTP"
-    },
-    "TokenStatus": "ACTIVE",
-    "DPAN": "4900********5678",
-    "ExpiryDate": "12/27"
-  }
-}
-```
+### 2. Card Activation
 
-## Token Lifecycle Management
+#### POST /v1/cards/{CardId}/activate
+
+Kích hoạt thẻ sau khi khách hàng nhận được.
 
 ```mermaid
 stateDiagram-v2
-    [*] --> Requested: Provision request
-    Requested --> Active: OTP verified
-    Requested --> Declined: Verification failed
+    [*] --> Inactive: Card Issued
+    Inactive --> PendingActivation: OTP Sent
+    PendingActivation --> Active: OTP Verified
+    PendingActivation --> Inactive: OTP Failed (3 times)
     
-    Active --> Suspended: Card locked
-    Active --> Deleted: User removes from wallet
-    Active --> Expired: Token expired
+    Active --> Blocked: Fraud Detection
+    Active --> Suspended: User Request
+    Suspended --> Active: User Unblock
     
-    Suspended --> Active: Card unlocked
-    Suspended --> Deleted: Permanent removal
+    Active --> Closed: Card Expired
+    Blocked --> Closed: Permanent Block
     
-    Deleted --> [*]
-    Declined --> [*]
-    Expired --> [*]
+    Closed --> [*]
 ```
-
-## Token Transaction Flow
-
-```mermaid
-sequenceDiagram
-    participant Merchant as Merchant Terminal
-    participant Network as Payment Network
-    participant TSP as Token Service Provider
-    participant Bank as Issuer Bank
-    participant CardCore as Card Core
-    
-    Merchant->>Network: Authorization Request<br/>DPAN: 4900****5678
-    Network->>TSP: Route to TSP
-    TSP->>TSP: Detokenize DPAN → PAN
-    TSP->>Bank: Authorization<br/>PAN: 4532****1234
-    
-    Bank->>CardCore: Check Balance & Limits
-    CardCore-->>Bank: Approved
-    Bank-->>TSP: Authorization Approved
-    TSP-->>Network: Approved
-    Network-->>Merchant: Approved
-    
-    Note over Merchant: Transaction Complete<br/>PAN never exposed
-```
-
-## Card Controls & Limits
-
-### Spending Controls
-
-```mermaid
-graph TB
-    Transaction[Card Transaction]
-    
-    Transaction --> CheckStatus{Card Status}
-    CheckStatus -->|Locked/Blocked| Decline1[Decline: Card not active]
-    CheckStatus -->|Active| CheckLimit{Daily Limit}
-    
-    CheckLimit -->|Exceeded| Decline2[Decline: Limit exceeded]
-    CheckLimit -->|OK| CheckMCC{Merchant Category}
-    
-    CheckMCC -->|Blocked MCC| Decline3[Decline: Merchant blocked]
-    CheckMCC -->|Allowed| CheckLocation{Location Check}
-    
-    CheckLocation -->|Suspicious| StepUp[Require 3DS]
-    CheckLocation -->|OK| CheckBalance{Available Balance}
-    
-    CheckBalance -->|Insufficient| Decline4[Decline: Insufficient funds]
-    CheckBalance -->|OK| Approve[Approve Transaction]
-    
-    StepUp -->|Verified| Approve
-    StepUp -->|Failed| Decline5[Decline: 3DS failed]
-```
-
-### Control Settings API
-
-#### PUT /v1/cards/{CardId}/controls
-
-```json
-{
-  "SpendingLimits": {
-    "DailyLimit": {
-      "Amount": "10000000",
-      "Currency": "VND"
-    },
-    "MonthlyLimit": {
-      "Amount": "50000000",
-      "Currency": "VND"
-    },
-    "PerTransactionLimit": {
-      "Amount": "5000000",
-      "Currency": "VND"
-    }
-  },
-  "AllowedMerchantCategories": [
-    "5411",
-    "5812",
-    "5999"
-  ],
-  "BlockedMerchantCategories": [
-    "7995",
-    "9754"
-  ],
-  "AllowedCountries": ["VN", "TH", "SG"],
-  "OnlineTransactions": true,
-  "ContactlessTransactions": true,
-  "ATMWithdrawals": true
-}
-```
-
-## 3D Secure Integration
-
-```mermaid
-sequenceDiagram
-    participant User as Cardholder
-    participant Merchant as Merchant
-    participant ACS as Bank ACS
-    participant Bank as Issuer Bank
-    
-    User->>Merchant: Enter Card Details
-    Merchant->>ACS: 3DS Authentication Request
-    
-    ACS->>Bank: Verify Card & Risk
-    Bank-->>ACS: Risk Score
-    
-    alt Low Risk (Frictionless)
-        ACS-->>Merchant: Authentication Success
-    else High Risk (Challenge)
-        ACS->>User: Challenge (OTP/Biometric)
-        User->>ACS: Submit Challenge Response
-        ACS->>Bank: Verify Response
-        Bank-->>ACS: Verified
-        ACS-->>Merchant: Authentication Success
-    end
-    
-    Merchant->>Bank: Authorization Request<br/>+ 3DS Cryptogram
-    Bank-->>Merchant: Approved
-```
-
-## Virtual Card Management
-
-### Instant Virtual Card
-
-```mermaid
-graph LR
-    subgraph "Use Cases"
-        Online[Online Shopping]
-        Subscription[Subscription Services]
-        Trial[Free Trials]
-        Temp[Temporary Merchants]
-    end
-    
-    subgraph "Features"
-        Instant[Instant Issuance<br/>< 1 second]
-        Disposable[Single-use or<br/>Time-limited]
-        Limit[Custom Limits]
-        Control[Full Control via API]
-    end
-    
-    Online --> Instant
-    Subscription --> Disposable
-    Trial --> Limit
-    Temp --> Control
-```
-
-#### POST /v1/cards/virtual
 
 **Request:**
 ```json
 {
-  "CardType": "SINGLE_USE",
-  "LinkedAccount": "1234567890",
-  "SpendingLimit": {
-    "Amount": "1000000",
-    "Currency": "VND"
-  },
-  "ValidUntil": "2024-12-31T23:59:59+07:00",
-  "Purpose": "Online shopping at Shopee"
+  "ActivationCode": "123456",
+  "CVV": "123",
+  "PIN": "encrypted_pin_data"
+}
+```
+
+### 3. Card Tokenization
+
+#### POST /v1/cards/{CardId}/tokens
+
+Tạo token cho thẻ để sử dụng trong giao dịch không tiếp xúc.
+
+```mermaid
+graph TB
+    PAN[PAN: 4111-1111-1111-1111]
+    
+    PAN --> Tokenize[Tokenization Engine]
+    Tokenize --> Token[Token: 4900-0000-0000-1234]
+    
+    Token --> Store[Token Vault<br/>HSM Protected]
+    
+    subgraph "Token Metadata"
+        TokenID[Token ID]
+        TokenStatus[Status: Active]
+        TokenExpiry[Expiry: 12/27]
+        DeviceID[Device: iPhone 12]
+    end
+    
+    Token --> TokenID
+    Token --> TokenStatus
+    Token --> TokenExpiry
+    Token --> DeviceID
+    
+    style PAN fill:#ff6b6b,stroke:#c62828,color:#fff
+    style Token fill:#4caf50,stroke:#2e7d32,color:#fff
+    style Store fill:#ffa726,stroke:#e65100
+```
+
+**Key Properties:**
+
+| Property | PAN (Original) | Token (Substitute) |
+|----------|----------------|---------------------|
+| **Format** | 16 digits | 16 digits (same format) |
+| **Validity** | Card lifetime | Per-device, time-limited |
+| **Storage** | HSM only | Can be stored |
+| **Reversible** | N/A | Yes (with TSP key) |
+| **Domain** | Universal | Device/merchant specific |
+
+**Response:**
+```json
+{
+  "TokenId": "token-xyz789",
+  "TokenizedPAN": "4900000000001234",
+  "TokenExpiry": "12/27",
+  "TokenType": "DEVICE",
+  "DeviceId": "device-iphone12-001",
+  "TokenStatus": "Active",
+  "TokenRequestorId": "40010030273"
+}
+```
+
+### 4. NFC Push Provisioning
+
+#### POST /v1/cards/{CardId}/provision
+
+Đẩy thẻ lên ví điện tử (Apple Pay, Google Pay).
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant Wallet as Mobile Wallet
+    participant TPP
+    participant CardSvc as Card Service
+    participant TSP as Token Service Provider
+    participant Issuer as Issuer Bank
+    
+    User->>Wallet: Add Card to Wallet
+    Wallet->>TPP: Request Provisioning
+    TPP->>CardSvc: POST /cards/{id}/provision
+    
+    CardSvc->>CardSvc: Validate Card<br/>Check eligibility
+    
+    CardSvc->>TSP: Request Token<br/>+ Device fingerprint
+    TSP->>TSP: Generate Token
+    TSP->>TSP: Create DPAN
+    
+    TSP->>Issuer: Request Authorization<br/>Yellow Path
+    Issuer->>User: Send OTP via SMS
+    User->>Issuer: Enter OTP
+    Issuer->>TSP: Authorization Approved
+    
+    TSP-->>CardSvc: Token + Cryptogram
+    CardSvc-->>TPP: Provisioning Data
+    TPP-->>Wallet: Push to Wallet
+    Wallet->>Wallet: Store Token securely<br/>in Secure Element
+    
+    Wallet-->>User: Card Added Successfully
+```
+
+**Request:**
+```json
+{
+  "WalletProvider": "APPLE_PAY",
+  "DeviceId": "A1B2C3D4E5F6",
+  "DeviceType": "iPhone",
+  "DeviceName": "iPhone của Tôi",
+  "OSVersion": "iOS 17.2",
+  "WalletAccountId": "wallet-acc-123"
 }
 ```
 
 **Response:**
 ```json
 {
-  "Data": {
-    "CardId": "vcard-temp-123",
-    "PAN": "4532123456789999",
-    "CVV": "999",
-    "ExpiryDate": "12/24",
-    "Status": "Active",
-    "CardType": "SINGLE_USE",
-    "RemainingLimit": {
-      "Amount": "1000000",
-      "Currency": "VND"
-    }
+  "ProvisioningId": "prov-abc123",
+  "Status": "Pending",
+  "OTPRequired": true,
+  "OTPDelivery": "SMS",
+  "ActivationData": "encrypted_activation_data",
+  "OpaquePaymentCard": "encrypted_token_data"
+}
+```
+
+### 5. Card Lifecycle Management
+
+#### PATCH /v1/cards/{CardId}/status
+
+Quản lý trạng thái thẻ (khóa, mở khóa, hủy).
+
+**Request:**
+```json
+{
+  "Action": "BLOCK",
+  "Reason": "LOST",
+  "TemporaryBlock": false,
+  "ReasonCode": "01"
+}
+```
+
+**Actions:**
+- `ACTIVATE`: Kích hoạt thẻ
+- `BLOCK`: Khóa thẻ (tạm thời hoặc vĩnh viễn)
+- `UNBLOCK`: Mở khóa thẻ
+- `CLOSE`: Đóng thẻ (không thể hoàn tác)
+
+### 6. Card Controls
+
+#### PUT /v1/cards/{CardId}/controls
+
+Thiết lập giới hạn và kiểm soát sử dụng thẻ.
+
+```mermaid
+graph TB
+    subgraph "Card Controls"
+        Limit[Transaction Limits<br/>• Daily limit<br/>• Per-transaction limit<br/>• Monthly limit]
+        
+        Geo[Geographic Controls<br/>• Allowed countries<br/>• Blocked regions<br/>• Domestic only]
+        
+        MCC[Merchant Controls<br/>• Allowed MCCs<br/>• Blocked categories<br/>• ATM only]
+        
+        Channel[Channel Controls<br/>• E-commerce: ON/OFF<br/>• ATM: ON/OFF<br/>• POS: ON/OFF<br/>• Contactless: ON/OFF]
+    end
+    
+    Card[Card: 4111-****-1111] --> Limit
+    Card --> Geo
+    Card --> MCC
+    Card --> Channel
+    
+    style Card fill:#64b5f6,stroke:#1565c0
+```
+
+**Request:**
+```json
+{
+  "DailyLimit": {
+    "Amount": "10000000",
+    "Currency": "VND"
+  },
+  "PerTransactionLimit": {
+    "Amount": "5000000",
+    "Currency": "VND"
+  },
+  "AllowedCountries": ["VN"],
+  "AllowedMCC": ["5411", "5812", "5999"],
+  "ChannelControls": {
+    "Ecommerce": true,
+    "ATM": true,
+    "POS": true,
+    "Contactless": true
   }
 }
 ```
 
-## Security Best Practices
+## Security Architecture
+
+### EMV Tokenization
+
+```mermaid
+graph LR
+    subgraph "Card Data"
+        PAN[Primary Account Number<br/>16 digits]
+        CVV[CVV: 3 digits]
+        Expiry[Expiry: MM/YY]
+    end
+    
+    subgraph "Tokenization"
+        TSP[Token Service Provider]
+        HSM[Hardware Security Module]
+        Vault[Token Vault]
+    end
+    
+    subgraph "Token Output"
+        DPAN[Device PAN<br/>Token: 16 digits]
+        TokenCVV[Token CVV]
+        Cryptogram[Dynamic Cryptogram<br/>Changes per transaction]
+    end
+    
+    PAN --> TSP
+    CVV --> TSP
+    Expiry --> TSP
+    
+    TSP --> HSM
+    HSM --> Vault
+    
+    Vault --> DPAN
+    Vault --> TokenCVV
+    HSM --> Cryptogram
+    
+    style PAN fill:#f44336,color:#fff
+    style DPAN fill:#4caf50,color:#fff
+    style HSM fill:#ff9800
+```
+
+### Key Management
+
+**Encryption Keys:**
+
+| Key Type | Purpose | Storage | Rotation |
+|----------|---------|---------|----------|
+| **KEK** (Key Encryption Key) | Encrypt other keys | HSM | 1 year |
+| **DEK** (Data Encryption Key) | Encrypt PAN | HSM | 90 days |
+| **TMK** (Token Master Key) | Generate tokens | HSM | 2 years |
+| **CVK** (Card Verification Key) | Generate CVV | HSM | Never (fixed) |
 
 ### PCI DSS Compliance
 
 ```mermaid
 graph TB
-    subgraph "Data Protection"
-        Encrypt[Encrypt PAN at Rest<br/>AES-256]
-        Tokenize[Tokenize for Storage<br/>Never store CVV]
-        HSM_Key[Keys in HSM Only]
+    subgraph "PCI DSS Requirements"
+        R1[Requirement 3<br/>Protect Stored Cardholder Data]
+        R2[Requirement 4<br/>Encrypt Transmission]
+        R3[Requirement 8<br/>Strong Access Control]
+        R4[Requirement 10<br/>Log All Access]
     end
     
-    subgraph "Access Control"
-        RBAC[Role-Based Access]
-        MFA[Multi-Factor Auth]
-        Audit[Comprehensive Logging]
+    subgraph "Implementation"
+        I1[HSM for PAN Storage]
+        I2[TLS 1.3 + mTLS]
+        I3[MFA + RBAC]
+        I4[Audit Logs 7 years]
     end
     
-    subgraph "Network Security"
-        Segment[Network Segmentation]
-        Firewall[Firewall Rules]
-        IDS[Intrusion Detection]
-    end
+    R1 --> I1
+    R2 --> I2
+    R3 --> I3
+    R4 --> I4
     
-    subgraph "Compliance"
-        PCI[PCI DSS Level 1]
-        Penetration[Quarterly Pen Tests]
-        Scan[Vulnerability Scans]
-    end
+    style R1 fill:#f44336,color:#fff
+    style R2 fill:#ff9800
+    style R3 fill:#ffc107
+    style R4 fill:#4caf50,color:#fff
 ```
 
-### Sensitive Data Handling
+**Key Controls:**
 
-**Never Log:**
-- Full PAN (Primary Account Number)
-- CVV/CVC
-- PIN or PIN Block (unencrypted)
-- Magnetic stripe data
-- CAV/CID/CVV2
+1. ✅ PAN never stored in clear text
+2. ✅ PAN truncated in logs (first 6 + last 4)
+3. ✅ CVV never stored after authorization
+4. ✅ Strong cryptography (AES-256)
+5. ✅ Regular penetration testing
+6. ✅ Network segmentation (card data isolated)
 
-**Always Mask:**
-```javascript
-function maskPAN(pan) {
-  return pan.substring(0, 6) + '*'.repeat(pan.length - 10) + pan.substring(pan.length - 4);
-}
-// 4532123456781234 → 453212******1234
-```
-
-## Monitoring & Alerts
-
-### Real-time Fraud Detection
+## Token Lifecycle
 
 ```mermaid
-graph TB
-    Transaction[Card Transaction]
+stateDiagram-v2
+    [*] --> Requested: Provisioning Request
+    Requested --> Pending: OTP Sent
+    Pending --> Active: OTP Verified
+    Pending --> Declined: OTP Failed
     
-    Transaction --> Rules{Fraud Rules}
+    Active --> Suspended: Suspicious Activity
+    Active --> Inactive: Device Lost
+    Suspended --> Active: Resumed
     
-    Rules --> Velocity{Velocity Check<br/>5 txns/5 mins}
-    Rules --> Amount{Unusual Amount<br/>vs. History}
-    Rules --> Location{Location Jump<br/>Impossible travel}
-    Rules --> MCC{High-Risk MCC}
+    Inactive --> Deleted: 90 Days Passed
+    Active --> Deleted: User Removed Card
     
-    Velocity -->|Triggered| Alert[Send Alert]
-    Amount -->|Triggered| Alert
-    Location -->|Triggered| Alert
-    MCC -->|Triggered| Alert
+    Declined --> [*]
+    Deleted --> [*]
     
-    Alert --> Block{Auto Block?}
-    Block -->|Yes| LockCard[Lock Card]
-    Block -->|No| Notify[Notify User]
-    
-    Notify --> UserConfirm{User Confirms}
-    UserConfirm -->|Fraud| LockCard
-    UserConfirm -->|Legitimate| Whitelist[Add to Whitelist]
+    note right of Active
+        Token valid for transactions
+        Cryptogram generated per txn
+    end note
 ```
+
+## Transaction Flow with Token
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant Device as Mobile Device<br/>(Secure Element)
+    participant POS as POS Terminal
+    participant Acquirer
+    participant Network as Card Network
+    participant TSP as Token Service
+    participant Issuer
+    
+    User->>Device: Tap to Pay (NFC)
+    Device->>Device: Generate Cryptogram<br/>Using Token
+    Device->>POS: Token + Cryptogram
+    
+    POS->>Acquirer: Authorization Request<br/>Token-based
+    Acquirer->>Network: Forward Request
+    Network->>TSP: De-tokenize Request
+    
+    TSP->>TSP: Validate Cryptogram
+    TSP->>TSP: Retrieve Real PAN
+    TSP->>Network: Return PAN
+    
+    Network->>Issuer: Authorization with PAN
+    Issuer->>Issuer: Validate + Check Funds
+    Issuer-->>Network: Approved
+    
+    Network-->>Acquirer: Approved
+    Acquirer-->>POS: Approved
+    POS-->>Device: Transaction Success
+    Device-->>User: ✓ Payment Successful
+```
+
+## Error Handling
+
+| Error Code | Mô Tả | Hành Động |
+|------------|-------|-----------|
+| `CARD_NOT_ELIGIBLE` | Thẻ không đủ điều kiện tokenization | Kiểm tra loại thẻ |
+| `DEVICE_NOT_SUPPORTED` | Thiết bị không hỗ trợ | Nâng cấp OS |
+| `OTP_EXPIRED` | OTP hết hạn | Gửi OTP mới |
+| `PROVISIONING_LIMIT_EXCEEDED` | Vượt quá số lượng thiết bị | Xóa thiết bị cũ |
+| `TOKEN_SUSPENDED` | Token bị tạm ngưng | Liên hệ ngân hàng |
+| `CRYPTOGRAM_INVALID` | Cryptogram không hợp lệ | Reprovision token |
+
+## Performance & Scalability
+
+**SLA Targets:**
+
+| Operation | Response Time | Throughput |
+|-----------|---------------|------------|
+| Card Issuance | < 3s | 100 TPS |
+| Tokenization | < 500ms | 500 TPS |
+| Provisioning | < 2s | 200 TPS |
+| Transaction Auth | < 200ms | 5000 TPS |
 
 ## Compliance Checklist
 
-- [ ] PCI DSS Level 1 certification
-- [ ] HSM for key management
-- [ ] PAN encryption at rest (AES-256)
-- [ ] TLS 1.3 for data in transit
-- [ ] No CVV storage (ever)
-- [ ] 3D Secure 2.0 implementation
-- [ ] Token lifecycle management
-- [ ] Fraud detection rules
-- [ ] Real-time transaction monitoring
-- [ ] Audit logging (all card operations)
-- [ ] Quarterly penetration testing
-- [ ] Vulnerability scanning
-- [ ] Incident response plan
-- [ ] Data breach notification procedures
+- [ ] PCI DSS 4.0 certified
+- [ ] EMV tokenization compliant
+- [ ] HSM for all PAN operations
+- [ ] No PAN in logs (truncated only)
+- [ ] TLS 1.3 + mTLS for all communications
+- [ ] Strong Customer Authentication (SCA)
+- [ ] Fraud detection system integrated
+- [ ] Audit logs retained 7 years
+- [ ] Regular security assessments
+- [ ] Incident response plan documented
 
 ## Tài Liệu Tham Khảo
-- PCI DSS v4.0 Requirements
-- EMV 3D Secure 2.0 Specification
-- Visa Token Service (VTS) Integration Guide
-- Mastercard MDES API Reference
-- Apple Pay Push Provisioning Guide
-- Google Pay API Documentation
-- ISO 9564 - PIN Management
-- ISO 8583 - Card Transaction Messages
+
+- **Thông tư 64/2024/TT-NHNN** - Open API Regulations
+- **PCI DSS 4.0** - Payment Card Industry Data Security Standard
+- **EMV Payment Tokenisation Specification** - EMVCo
+- **ISO/IEC 11568** - Key Management
+- **Apple Pay Integration Guide** - Apple Developer
+- **Google Pay Integration Guide** - Google Developer
+- **Samsung Pay Integration Guide** - Samsung Developer
+
+---
+
+**Phiên bản:** 1.0  
+**Ngày cập nhật:** 15/12/2025  
+**Trạng thái:** Production Ready

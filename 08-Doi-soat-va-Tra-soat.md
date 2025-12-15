@@ -1,23 +1,38 @@
 # Đối Soát & Tra Soát (Reconciliation & Dispute Management)
 
+> **Tuân thủ:** Thông tư 64/2024/TT-NHNN | ISO 20022 | PCI DSS 4.0
+
 ## Tổng Quan
 
-Hệ thống đối soát và tra soát đảm bảo tính chính xác của dữ liệu giao dịch giữa TPP và Ngân hàng, hỗ trợ giải quyết khiếu nại và tranh chấp.
+Hệ thống đối soát và tra soát đảm bảo tính chính xác, minh bạch của dữ liệu giao dịch giữa TPP và Ngân hàng, hỗ trợ giải quyết tranh chấp và compliance.
+
+### Mục Tiêu
+
+1. **Đối soát tự động**: So khớp giao dịch giữa TPP và Bank
+2. **Báo cáo nhanh**: Báo cáo hàng ngày, hàng tháng
+3. **Phát hiện lỗi**: Tự động phát hiện giao dịch sai lệch
+4. **Giải quyết tranh chấp**: Quy trình tra soát rõ ràng
+5. **Audit trail**: Lưu vết đầy đủ cho kiểm toán
 
 ## Kiến Trúc Hệ Thống
 
 ```mermaid
 graph TB
     subgraph "TPP Systems"
-        TPP_DB[(TPP Transaction DB)]
         TPP_Portal[TPP Portal]
+        TPP_DB[(TPP Transaction DB)]
     end
     
-    subgraph "Reconciliation Services"
-        API[Reconciliation API]
-        Matcher[Auto Matching Engine]
-        Reporter[Report Generator]
-        Dispute[Dispute Management]
+    subgraph "Reconciliation API"
+        RecAPI[Reconciliation API<br/>RESTful + Batch]
+        Matcher[Auto Matching Engine<br/>ML-based]
+        Reporter[Report Generator<br/>PDF + Excel]
+    end
+    
+    subgraph "Dispute Management"
+        Dispute[Dispute Service]
+        Workflow[Workflow Engine]
+        SLA[SLA Monitor]
     end
     
     subgraph "Bank Systems"
@@ -27,750 +42,579 @@ graph TB
     end
     
     subgraph "File Exchange"
-        SFTP[SFTP Server]
-        S3[Cloud Storage]
+        SFTP[SFTP Server<br/>Secure File Transfer]
+        S3[Cloud Storage<br/>S3/MinIO]
     end
     
     subgraph "Notification"
-        Webhook[Webhook Service]
         Email[Email Service]
+        Webhook[Webhook Service]
+        SMS[SMS Gateway]
     end
     
-    TPP_Portal --> API
-    TPP_DB -.->|Upload| SFTP
+    TPP_Portal --> RecAPI
+    TPP_DB -.->|Upload CSV/Excel| SFTP
     
-    API --> Matcher
-    API --> Reporter
-    API --> Dispute
+    RecAPI --> Matcher
+    RecAPI --> Dispute
     
     Matcher --> Bank_DB
+    Matcher --> Reporter
+    
     Reporter --> SFTP
     Reporter --> S3
+    Reporter --> Email
     
+    Dispute --> Workflow
+    Dispute --> SLA
     Dispute --> Admin
     
-    API --> Webhook
-    API --> Email
+    Workflow --> Email
+    Workflow --> Webhook
+    Workflow --> SMS
     
-    Bank_DB --> Matcher
-    Core --> Bank_DB
+    Bank_DB --> Core
+    
+    style Matcher fill:#4caf50,stroke:#2e7d32,color:#fff
+    style Dispute fill:#ff9800,stroke:#e65100
+    style SLA fill:#f44336,stroke:#c62828,color:#fff
 ```
-
-## Quy Trình Đối Soát Tự Động
-
-```mermaid
-sequenceDiagram
-    participant Scheduler as Cron Scheduler
-    participant Recon as Reconciliation Service
-    participant Bank as Bank Database
-    participant TPP as TPP System
-    participant SFTP as SFTP Server
-    participant Notify as Notification Service
-    
-    Note over Scheduler: Daily at 9:00 AM (T+1)
-    
-    Scheduler->>Recon: Trigger Daily Reconciliation
-    Recon->>Bank: Extract T-1 Transactions
-    Bank-->>Recon: Bank Transaction File
-    
-    Recon->>SFTP: Fetch TPP Transaction File
-    SFTP-->>Recon: TPP Transaction File
-    
-    Recon->>Recon: Parse Both Files
-    Recon->>Recon: Match Transactions<br/>by RequestId + Amount + Date
-    
-    Recon->>Recon: Identify Discrepancies<br/>- Missing<br/>- Status Mismatch<br/>- Amount Mismatch
-    
-    Recon->>Recon: Generate Reconciliation Report
-    Recon->>SFTP: Upload Report
-    
-    Recon->>Notify: Send Summary Email
-    Notify->>TPP: Email with Report Link
-    
-    alt Discrepancies Found
-        Recon->>Notify: Send Alert
-        Notify->>TPP: Alert Email
-        Notify->>Bank: Alert to Admin
-    end
-```
-
-## Matching Logic
-
-```mermaid
-graph TB
-    Start[Transaction Records]
-    
-    Start --> Match1{Match by<br/>RequestId}
-    Match1 -->|Found| CheckStatus{Status Match?}
-    Match1 -->|Not Found| Missing[Missing Transaction]
-    
-    CheckStatus -->|Yes| CheckAmount{Amount Match?}
-    CheckStatus -->|No| StatusMismatch[Status Mismatch]
-    
-    CheckAmount -->|Yes| Matched[Matched ✓]
-    CheckAmount -->|No| AmountMismatch[Amount Mismatch]
-    
-    Missing --> Report[Add to Exception Report]
-    StatusMismatch --> Report
-    AmountMismatch --> Report
-    Matched --> Success[Add to Success Report]
-```
-
-### Matching Rules
-
-| Priority | Matching Key | Description |
-|----------|--------------|-------------|
-| 1 | `RequestId` | Unique transaction identifier from TPP |
-| 2 | `TransactionDate` | Transaction date (YYYY-MM-DD) |
-| 3 | `Amount` | Transaction amount (exact match) |
-| 4 | `DebtorAccount` | Source account number |
-| 5 | `CreditorAccount` | Destination account number |
 
 ## API Endpoints
 
-### 1. Transaction Inquiry
+### 1. Upload Reconciliation File
 
-#### GET /v1/reconciliation/transactions/{TransactionId}
+#### POST /v1/reconciliation/upload
+
+TPP upload file giao dịch để đối soát.
 
 ```mermaid
 sequenceDiagram
-    participant TPP as TPP
+    participant TPP
     participant API as Recon API
-    participant Cache as Redis Cache
-    participant DB as Transaction DB
+    participant Validator
+    participant Storage as File Storage
+    participant Queue as Message Queue
     
-    TPP->>API: GET /transactions/{id}
-    API->>Cache: Check Cache
+    TPP->>API: POST /reconciliation/upload<br/>+ CSV/Excel File
+    API->>Validator: Validate File Format
     
-    alt Cache Hit
-        Cache-->>API: Transaction Data
-    else Cache Miss
-        API->>DB: Query Transaction
-        DB-->>API: Transaction + Trace Logs
-        API->>Cache: Store (TTL: 5 min)
+    alt Invalid Format
+        Validator-->>API: Invalid Format
+        API-->>TPP: 400: Bad Request<br/>Error Details
+    else Valid Format
+        Validator-->>API: Valid
+        API->>Storage: Store Original File
+        Storage-->>API: File ID
+        
+        API->>Queue: Enqueue Processing Job
+        Queue-->>API: Job ID
+        
+        API-->>TPP: 202 Accepted<br/>ReconciliationId + Status URL
+        
+        Note over Queue: Background Processing
+        Queue->>Queue: Parse File
+        Queue->>Queue: Match Transactions
+        Queue->>Queue: Generate Report
+        Queue->>Webhook: Notify TPP (Complete)
     end
-    
-    API->>API: Mask Sensitive Data
-    API-->>TPP: 200 OK + Transaction Details
-```
-
-**Response:**
-```json
-{
-  "Data": {
-    "TransactionId": "txn-12345",
-    "RequestId": "req-tpp-67890",
-    "TransactionType": "FUND_TRANSFER",
-    "Status": "COMPLETED",
-    "Amount": {
-      "Amount": "1000000.00",
-      "Currency": "VND"
-    },
-    "DebtorAccount": "1234****7890",
-    "CreditorAccount": "0987****4321",
-    "TransactionDate": "2024-12-10",
-    "CompletionTime": "2024-12-10T10:30:45+07:00",
-    "Channel": "NAPAS_247",
-    "BankReference": "BANK-REF-001",
-    "TraceLog": [
-      {
-        "Timestamp": "2024-12-10T10:30:00+07:00",
-        "Stage": "RECEIVED",
-        "Status": "SUCCESS"
-      },
-      {
-        "Timestamp": "2024-12-10T10:30:30+07:00",
-        "Stage": "VALIDATED",
-        "Status": "SUCCESS"
-      },
-      {
-        "Timestamp": "2024-12-10T10:30:45+07:00",
-        "Stage": "COMPLETED",
-        "Status": "SUCCESS"
-      }
-    ]
-  }
-}
-```
-
-#### GET /v1/reconciliation/transactions
-
-Query transactions with filters.
-
-**Query Parameters:**
-- `fromDate`: Start date (YYYY-MM-DD)
-- `toDate`: End date (YYYY-MM-DD)
-- `status`: Transaction status
-- `type`: Transaction type
-- `page`: Page number
-- `limit`: Items per page (max 100)
-
-### 2. Reconciliation Reports
-
-#### POST /v1/reconciliation/reports
-
-```mermaid
-graph TB
-    Request[Create Report Request]
-    
-    Request --> Validate{Validate Parameters}
-    Validate -->|Invalid| Error[400 Bad Request]
-    Validate -->|Valid| CheckRange{Date Range}
-    
-    CheckRange -->|> 31 days| Error2[400 Range too large]
-    CheckRange -->|Valid| Queue[Add to Processing Queue]
-    
-    Queue --> Process[Background Processing]
-    Process --> Extract[Extract Bank Data]
-    Process --> Fetch[Fetch TPP Data]
-    
-    Extract --> Match[Run Matching]
-    Fetch --> Match
-    
-    Match --> Generate[Generate Report File]
-    Generate --> Format{Output Format}
-    
-    Format -->|ISO 20022| XML[camt.053 XML]
-    Format -->|CSV| CSV_File[CSV File]
-    Format -->|Excel| XLSX[Excel File]
-    Format -->|JSON| JSON_File[JSON File]
-    
-    XML --> Upload[Upload to SFTP/S3]
-    CSV_File --> Upload
-    XLSX --> Upload
-    JSON_File --> Upload
-    
-    Upload --> Notify[Send Notification]
-    Notify --> Complete[Report Ready]
 ```
 
 **Request:**
-```json
-{
-  "ReportType": "DAILY_RECONCILIATION",
-  "FromDate": "2024-12-09",
-  "ToDate": "2024-12-09",
-  "OutputFormat": "ISO20022_CAMT053",
-  "DeliveryMethod": "SFTP",
-  "IncludeDetails": true
-}
+```http
+POST /v1/reconciliation/upload
+Content-Type: multipart/form-data
+
+file: transactions.csv
+reconciliationDate: 2025-12-14
 ```
 
 **Response:**
 ```json
 {
-  "Data": {
-    "ReportId": "report-20241210-001",
-    "Status": "PROCESSING",
-    "EstimatedCompletionTime": "2024-12-10T11:00:00+07:00",
-    "CreatedAt": "2024-12-10T10:45:00+07:00"
-  },
-  "Links": {
-    "Self": "https://api.bank.vn/v1/reconciliation/reports/report-20241210-001",
-    "Status": "https://api.bank.vn/v1/reconciliation/reports/report-20241210-001/status"
-  }
+  "ReconciliationId": "recon-20251214-001",
+  "Status": "Processing",
+  "UploadedAt": "2025-12-15T10:00:00+07:00",
+  "RecordCount": 1250,
+  "StatusUrl": "/v1/reconciliation/recon-20251214-001/status",
+  "EstimatedCompletionTime": "2025-12-15T10:15:00+07:00"
 }
 ```
 
-#### GET /v1/reconciliation/reports/{ReportId}
+### 2. Get Reconciliation Status
 
-Check report status and download.
+#### GET /v1/reconciliation/{ReconciliationId}/status
+
+Kiểm tra trạng thái đối soát.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Uploaded: File Uploaded
+    Uploaded --> Validating: Start Validation
+    Validating --> Processing: Valid
+    Validating --> Failed: Invalid
+    
+    Processing --> Matching: Parse Complete
+    Matching --> Completed: All Matched
+    Matching --> PartialMatch: Some Mismatches
+    
+    PartialMatch --> UnderReview: Manual Review
+    UnderReview --> Resolved: Disputes Resolved
+    
+    Failed --> [*]
+    Completed --> [*]
+    Resolved --> [*]
+```
 
 **Response:**
 ```json
 {
-  "Data": {
-    "ReportId": "report-20241210-001",
-    "Status": "COMPLETED",
-    "ReportType": "DAILY_RECONCILIATION",
-    "Period": {
-      "FromDate": "2024-12-09",
-      "ToDate": "2024-12-09"
-    },
-    "Summary": {
-      "TotalTransactions": 1250,
-      "MatchedTransactions": 1245,
-      "MissingInBank": 2,
-      "MissingInTPP": 1,
-      "StatusMismatch": 2,
-      "AmountMismatch": 0
-    },
-    "FileInfo": {
-      "FileName": "reconciliation_20241209.xml",
-      "FileSize": 2048576,
-      "Format": "ISO20022_CAMT053",
-      "GeneratedAt": "2024-12-10T10:55:00+07:00"
+  "ReconciliationId": "recon-20251214-001",
+  "Status": "Completed",
+  "Summary": {
+    "TotalRecords": 1250,
+    "Matched": 1245,
+    "Unmatched": 5,
+    "Amount": {
+      "Total": "5250000000",
+      "Matched": "5248500000",
+      "Variance": "1500000",
+      "Currency": "VND"
     }
   },
-  "Links": {
-    "Download": "https://api.bank.vn/v1/reconciliation/reports/report-20241210-001/download"
-  }
+  "ProcessedAt": "2025-12-15T10:12:35+07:00",
+  "ReportUrl": "/v1/reconciliation/recon-20251214-001/report",
+  "MismatchDetailsUrl": "/v1/reconciliation/recon-20251214-001/mismatches"
 }
 ```
 
-### 3. Auto Matching
+### 3. Get Reconciliation Report
 
-#### POST /v1/reconciliation/match
+#### GET /v1/reconciliation/{ReconciliationId}/report
 
-TPP gửi danh sách giao dịch để hệ thống tự động so khớp.
+Tải báo cáo đối soát chi tiết.
 
-```mermaid
-sequenceDiagram
-    participant TPP as TPP
-    participant API as Recon API
-    participant Matcher as Matching Engine
-    participant DB as Bank DB
-    
-    TPP->>API: POST /reconciliation/match<br/>+ Transaction List
-    API->>API: Validate Payload
-    API->>Matcher: Start Matching Process
-    
-    loop For each TPP transaction
-        Matcher->>DB: Find matching Bank transaction
-        alt Match Found
-            Matcher->>Matcher: Compare Status & Amount
-            alt Exact Match
-                Matcher->>Matcher: Mark as MATCHED
-            else Mismatch
-                Matcher->>Matcher: Mark as DISCREPANCY
-            end
-        else Not Found
-            Matcher->>Matcher: Mark as MISSING_IN_BANK
-        end
-    end
-    
-    Matcher-->>API: Matching Results
-    API-->>TPP: 200 OK + Results
-```
+**Response Formats:**
+- `application/json` - JSON data
+- `application/pdf` - PDF report
+- `application/vnd.ms-excel` - Excel file
+- `text/csv` - CSV file
 
-**Request:**
+**JSON Response Example:**
 ```json
 {
-  "Transactions": [
+  "ReconciliationId": "recon-20251214-001",
+  "ReconciliationDate": "2025-12-14",
+  "GeneratedAt": "2025-12-15T10:12:35+07:00",
+  "TPP": {
+    "TPPId": "tpp-12345",
+    "TPPName": "FinTech Solutions Ltd"
+  },
+  "Summary": {
+    "TotalTransactions": 1250,
+    "MatchedTransactions": 1245,
+    "UnmatchedTransactions": 5,
+    "TotalAmount": "5250000000 VND",
+    "MatchedAmount": "5248500000 VND",
+    "VarianceAmount": "1500000 VND",
+    "VariancePercentage": 0.03
+  },
+  "MatchBreakdown": {
+    "PerfectMatch": 1200,
+    "FuzzyMatch": 45,
+    "NoMatch": 5
+  },
+  "Mismatches": [
     {
-      "RequestId": "req-tpp-001",
-      "TransactionDate": "2024-12-09",
-      "Amount": "1000000.00",
-      "Currency": "VND",
-      "Status": "SUCCESS",
-      "DebtorAccount": "1234567890",
-      "CreditorAccount": "0987654321"
-    },
-    {
-      "RequestId": "req-tpp-002",
-      "TransactionDate": "2024-12-09",
-      "Amount": "500000.00",
-      "Currency": "VND",
-      "Status": "SUCCESS",
-      "DebtorAccount": "1234567890",
-      "CreditorAccount": "1111222233"
+      "TransactionId": "txn-001",
+      "TPPAmount": "500000",
+      "BankAmount": "500000",
+      "TPPDate": "2025-12-14T14:30:00",
+      "BankDate": "2025-12-14T14:31:00",
+      "Issue": "Timestamp Mismatch",
+      "Severity": "Low"
     }
   ]
 }
 ```
 
-**Response:**
-```json
-{
-  "Data": {
-    "MatchingResults": [
-      {
-        "RequestId": "req-tpp-001",
-        "MatchStatus": "MATCHED",
-        "BankTransactionId": "txn-bank-12345",
-        "BankStatus": "COMPLETED",
-        "MatchConfidence": 1.0
-      },
-      {
-        "RequestId": "req-tpp-002",
-        "MatchStatus": "STATUS_MISMATCH",
-        "BankTransactionId": "txn-bank-12346",
-        "BankStatus": "PENDING",
-        "TPPStatus": "SUCCESS",
-        "MatchConfidence": 0.8,
-        "Discrepancy": "Status mismatch: TPP=SUCCESS, Bank=PENDING"
-      }
-    ],
-    "Summary": {
-      "Total": 2,
-      "Matched": 1,
-      "Discrepancies": 1,
-      "Missing": 0
-    }
-  }
-}
-```
+### 4. Create Dispute
 
-## Dispute Management
+#### POST /v1/disputes
 
-### Dispute Lifecycle
-
-```mermaid
-stateDiagram-v2
-    [*] --> SUBMITTED: TPP creates dispute
-    SUBMITTED --> ACKNOWLEDGED: Bank acknowledges
-    ACKNOWLEDGED --> INVESTIGATING: Investigation started
-    
-    INVESTIGATING --> PENDING_INFO: Need more info
-    PENDING_INFO --> INVESTIGATING: Info provided
-    
-    INVESTIGATING --> RESOLVED: Issue resolved
-    INVESTIGATING --> REJECTED: Dispute rejected
-    
-    RESOLVED --> REFUNDED: Refund processed
-    RESOLVED --> COMPLETED: No refund needed
-    RESOLVED --> PENDING_CUSTOMER: Customer action required
-    
-    REJECTED --> [*]
-    REFUNDED --> [*]
-    COMPLETED --> [*]
-    PENDING_CUSTOMER --> COMPLETED: Customer confirms
-```
-
-### Create Dispute
-
-#### POST /v1/reconciliation/disputes
+Tạo yêu cầu tra soát cho giao dịch có vấn đề.
 
 ```mermaid
 sequenceDiagram
-    participant TPP as TPP
+    participant TPP
     participant API as Dispute API
-    participant Workflow as Workflow Engine
-    participant Admin as Bank Admin
-    participant Email as Email Service
+    participant Workflow
+    participant Investigator as Bank Investigator
+    participant Core as Core Banking
+    participant Notification
     
-    TPP->>API: POST /disputes<br/>+ Transaction Details + Evidence
-    API->>API: Validate Dispute
-    API->>API: Generate Dispute ID
+    TPP->>API: POST /disputes<br/>Transaction Details + Reason
+    API->>API: Validate Request
     API->>Workflow: Create Dispute Case
+    Workflow->>Workflow: Assign Case Number<br/>Set SLA (3 days)
     
-    Workflow->>Admin: Assign to Agent
-    Workflow->>Email: Send Notification
-    Email->>TPP: Dispute Received Email
-    Email->>Admin: New Dispute Alert
+    Workflow->>Investigator: Notify via Email
+    Workflow->>Notification: Send to TPP<br/>Case Created
+    Notification-->>TPP: Email: Case #12345 Created
     
-    API-->>TPP: 201 Created<br/>Dispute ID + Case Number
+    Investigator->>Core: Investigate Transaction
+    Core-->>Investigator: Transaction Details
+    
+    Investigator->>Workflow: Update Status<br/>Add Comments
+    Workflow->>Notification: Notify TPP<br/>Status Update
+    
+    alt Resolved - TPP Correct
+        Investigator->>Workflow: Resolve: TPP Correct<br/>Bank will adjust
+        Workflow->>Core: Create Adjustment
+        Workflow->>Notification: Notify TPP<br/>Resolved in favor
+    else Resolved - Bank Correct
+        Investigator->>Workflow: Resolve: Bank Correct<br/>No adjustment needed
+        Workflow->>Notification: Notify TPP<br/>Evidence provided
+    else Escalated
+        Investigator->>Workflow: Escalate to Manager
+        Workflow->>Notification: Notify TPP<br/>Escalated
+    end
 ```
 
 **Request:**
 ```json
 {
   "TransactionId": "txn-12345",
-  "DisputeType": "TRANSACTION_NOT_COMPLETED",
-  "DisputeReason": "Transaction shows success on TPP side but customer did not receive funds",
-  "Evidence": {
-    "Screenshots": [
-      "base64_encoded_screenshot_1",
-      "base64_encoded_screenshot_2"
-    ],
-    "CustomerStatement": "I initiated a transfer of 1,000,000 VND on 2024-12-09 but the beneficiary has not received the money.",
-    "TPPTransactionLog": {
-      "RequestId": "req-tpp-001",
-      "Status": "SUCCESS",
-      "Timestamp": "2024-12-09T15:30:00+07:00"
-    }
+  "DisputeType": "AmountMismatch",
+  "Description": "Transaction amount in our system is 500,000 VND but bank record shows 450,000 VND",
+  "ExpectedAmount": {
+    "Amount": "500000",
+    "Currency": "VND"
   },
-  "CustomerInfo": {
-    "Name": "NGUYEN VAN A",
-    "Phone": "0901234567",
-    "Email": "nguyenvana@example.com"
+  "ActualAmount": {
+    "Amount": "450000",
+    "Currency": "VND"
   },
-  "Priority": "HIGH"
-}
-```
-
-**Response:**
-```json
-{
-  "Data": {
-    "DisputeId": "dispute-12345",
-    "CaseNumber": "CASE-2024-001234",
-    "Status": "SUBMITTED",
-    "CreatedAt": "2024-12-10T11:00:00+07:00",
-    "EstimatedResolutionTime": "2024-12-15T11:00:00+07:00",
-    "SLA": {
-      "ResponseTime": "24 hours",
-      "ResolutionTime": "5 business days"
-    }
-  },
-  "Links": {
-    "Self": "https://api.bank.vn/v1/reconciliation/disputes/dispute-12345",
-    "Updates": "https://api.bank.vn/v1/reconciliation/disputes/dispute-12345/updates"
-  }
-}
-```
-
-### Dispute Types
-
-| Type | Mô Tả | SLA |
-|------|-------|-----|
-| `TRANSACTION_NOT_COMPLETED` | Giao dịch không hoàn thành | 5 ngày |
-| `WRONG_AMOUNT` | Số tiền sai | 3 ngày |
-| `DUPLICATE_CHARGE` | Trừ tiền trùng lặp | 5 ngày |
-| `UNAUTHORIZED_TRANSACTION` | Giao dịch không được ủy quyền | 7 ngày |
-| `BENEFICIARY_NOT_RECEIVED` | Người nhận chưa nhận tiền | 7 ngày |
-| `TECHNICAL_ERROR` | Lỗi kỹ thuật | 3 ngày |
-
-### Track Dispute
-
-#### GET /v1/reconciliation/disputes/{DisputeId}
-
-**Response:**
-```json
-{
-  "Data": {
-    "DisputeId": "dispute-12345",
-    "CaseNumber": "CASE-2024-001234",
-    "Status": "INVESTIGATING",
-    "TransactionId": "txn-12345",
-    "DisputeType": "TRANSACTION_NOT_COMPLETED",
-    "CreatedAt": "2024-12-10T11:00:00+07:00",
-    "UpdatedAt": "2024-12-10T14:30:00+07:00",
-    "Timeline": [
-      {
-        "Timestamp": "2024-12-10T11:00:00+07:00",
-        "Status": "SUBMITTED",
-        "Actor": "TPP",
-        "Note": "Dispute created"
-      },
-      {
-        "Timestamp": "2024-12-10T11:15:00+07:00",
-        "Status": "ACKNOWLEDGED",
-        "Actor": "Bank Admin",
-        "Note": "Case assigned to Agent #123"
-      },
-      {
-        "Timestamp": "2024-12-10T14:30:00+07:00",
-        "Status": "INVESTIGATING",
-        "Actor": "Bank Agent",
-        "Note": "Checking with Napas for transaction status"
-      }
-    ],
-    "AssignedAgent": {
-      "Name": "Tran Van B",
-      "Email": "tranvanb@bank.vn",
-      "Phone": "0281234567"
-    }
-  }
-}
-```
-
-### Dispute Resolution
-
-#### GET /v1/reconciliation/disputes/{DisputeId}/resolution
-
-**Response:**
-```json
-{
-  "Data": {
-    "DisputeId": "dispute-12345",
-    "ResolutionStatus": "RESOLVED",
-    "ResolutionType": "REFUND",
-    "ResolutionDetails": {
-      "Finding": "Transaction was sent to Napas but failed at beneficiary bank. Funds were not debited from customer account.",
-      "Action": "No refund needed. Transaction already reversed.",
-      "RefundAmount": null,
-      "RefundTransactionId": null
+  "Evidence": [
+    {
+      "Type": "Screenshot",
+      "Url": "https://storage.com/evidence1.png"
     },
-    "ResolvedAt": "2024-12-12T10:00:00+07:00",
-    "ResolvedBy": {
-      "Name": "Tran Van B",
-      "Role": "Dispute Resolution Agent"
-    },
-    "CustomerNotified": true
-  }
-}
-```
-
-## Webhook Notifications
-
-### Subscribe to Events
-
-#### POST /v1/reconciliation/webhooks
-
-```json
-{
-  "CallbackUrl": "https://tpp.example.com/webhooks/reconciliation",
-  "Events": [
-    "DISPUTE_STATUS_CHANGED",
-    "REPORT_COMPLETED",
-    "MATCHING_DISCREPANCY_FOUND",
-    "TRANSACTION_REVERSED"
+    {
+      "Type": "Receipt",
+      "Url": "https://storage.com/receipt.pdf"
+    }
   ],
-  "Secret": "webhook_secret_key_12345"
-}
-```
-
-### Webhook Payload
-
-```json
-{
-  "EventId": "evt-12345",
-  "EventType": "DISPUTE_STATUS_CHANGED",
-  "Timestamp": "2024-12-10T15:00:00+07:00",
-  "Data": {
-    "DisputeId": "dispute-12345",
-    "OldStatus": "INVESTIGATING",
-    "NewStatus": "RESOLVED",
-    "ResolutionType": "REFUND"
+  "ContactPerson": {
+    "Name": "Nguyen Van A",
+    "Email": "nguyenvana@fintech.com",
+    "Phone": "+84901234567"
   }
 }
 ```
 
-**Signature Verification:**
-```javascript
-const crypto = require('crypto');
-
-function verifyWebhookSignature(payload, signature, secret) {
-  const hmac = crypto.createHmac('sha256', secret);
-  hmac.update(JSON.stringify(payload));
-  const expectedSignature = hmac.digest('hex');
-  return crypto.timingSafeEqual(
-    Buffer.from(signature),
-    Buffer.from(expectedSignature)
-  );
+**Response:**
+```json
+{
+  "DisputeId": "dispute-12345",
+  "Status": "Open",
+  "Priority": "Normal",
+  "SLA": {
+    "ResolutionDeadline": "2025-12-18T17:00:00+07:00",
+    "BusinessDaysRemaining": 3
+  },
+  "AssignedTo": "Bank Investigation Team",
+  "CreatedAt": "2025-12-15T10:30:00+07:00",
+  "TrackingUrl": "/v1/disputes/dispute-12345"
 }
 ```
 
-## File Formats
+### 5. Get Dispute Status
 
-### ISO 20022 camt.053 (Bank Statement)
+#### GET /v1/disputes/{DisputeId}
 
-```xml
-<?xml version="1.0" encoding="UTF-8"?>
-<Document xmlns="urn:iso:std:iso:20022:tech:xsd:camt.053.001.08">
-  <BkToCstmrStmt>
-    <GrpHdr>
-      <MsgId>STMT-20241209-001</MsgId>
-      <CreDtTm>2024-12-10T09:00:00+07:00</CreDtTm>
-    </GrpHdr>
-    <Stmt>
-      <Id>20241209</Id>
-      <CreDtTm>2024-12-10T09:00:00+07:00</CreDtTm>
-      <FrToDt>
-        <FrDtTm>2024-12-09T00:00:00+07:00</FrDtTm>
-        <ToDtTm>2024-12-09T23:59:59+07:00</ToDtTm>
-      </FrToDt>
-      <Acct>
-        <Id>
-          <Othr>
-            <Id>1234567890</Id>
-          </Othr>
-        </Id>
-        <Ccy>VND</Ccy>
-      </Acct>
-      <Bal>
-        <Tp>
-          <CdOrPrtry>
-            <Cd>OPBD</Cd>
-          </CdOrPrtry>
-        </Tp>
-        <Amt Ccy="VND">10000000.00</Amt>
-        <CdtDbtInd>CRDT</CdtDbtInd>
-        <Dt>
-          <Dt>2024-12-09</Dt>
-        </Dt>
-      </Bal>
-      <Ntry>
-        <Amt Ccy="VND">1000000.00</Amt>
-        <CdtDbtInd>DBIT</CdtDbtInd>
-        <Sts>BOOK</Sts>
-        <BookgDt>
-          <Dt>2024-12-09</Dt>
-        </BookgDt>
-        <ValDt>
-          <Dt>2024-12-09</Dt>
-        </ValDt>
-        <BkTxCd>
-          <Domn>
-            <Cd>PMNT</Cd>
-            <Fmly>
-              <Cd>ICDT</Cd>
-              <SubFmlyCd>ESCT</SubFmlyCd>
-            </Fmly>
-          </Domn>
-        </BkTxCd>
-        <NtryDtls>
-          <TxDtls>
-            <Refs>
-              <EndToEndId>req-tpp-001</EndToEndId>
-              <TxId>txn-bank-12345</TxId>
-            </Refs>
-            <AmtDtls>
-              <TxAmt>
-                <Amt Ccy="VND">1000000.00</Amt>
-              </TxAmt>
-            </AmtDtls>
-          </TxDtls>
-        </NtryDtls>
-      </Ntry>
-    </Stmt>
-  </BkToCstmrStmt>
-</Document>
+Theo dõi tiến độ giải quyết tranh chấp.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Open: Dispute Created
+    Open --> UnderInvestigation: Assigned
+    
+    UnderInvestigation --> PendingEvidence: Need More Info
+    PendingEvidence --> UnderInvestigation: Evidence Provided
+    
+    UnderInvestigation --> Escalated: Complex Case
+    Escalated --> UnderInvestigation: Assigned to Senior
+    
+    UnderInvestigation --> Resolved: Investigation Complete
+    
+    Resolved --> Closed: Both Parties Agree
+    Resolved --> Reopened: TPP Objects
+    
+    Reopened --> UnderInvestigation
+    
+    Closed --> [*]
+    
+    note right of Resolved
+        Resolution Types:
+        - TPP Correct
+        - Bank Correct
+        - Partial Adjustment
+        - Mutual Agreement
+    end note
 ```
 
-### CSV Format
-
-```csv
-TransactionDate,RequestId,BankTransactionId,Type,Status,Amount,Currency,DebtorAccount,CreditorAccount,Channel,CompletionTime
-2024-12-09,req-tpp-001,txn-bank-12345,FUND_TRANSFER,COMPLETED,1000000.00,VND,1234567890,0987654321,NAPAS_247,2024-12-09T15:30:45+07:00
-2024-12-09,req-tpp-002,txn-bank-12346,FUND_TRANSFER,PENDING,500000.00,VND,1234567890,1111222233,NAPAS_247,
+**Response:**
+```json
+{
+  "DisputeId": "dispute-12345",
+  "Status": "UnderInvestigation",
+  "TransactionId": "txn-12345",
+  "DisputeType": "AmountMismatch",
+  "Priority": "Normal",
+  "Timeline": [
+    {
+      "Status": "Open",
+      "Timestamp": "2025-12-15T10:30:00+07:00",
+      "Actor": "TPP User",
+      "Comment": "Dispute created"
+    },
+    {
+      "Status": "UnderInvestigation",
+      "Timestamp": "2025-12-15T11:00:00+07:00",
+      "Actor": "Bank Investigator",
+      "Comment": "Case assigned to John Doe"
+    },
+    {
+      "Status": "UnderInvestigation",
+      "Timestamp": "2025-12-15T14:30:00+07:00",
+      "Actor": "Bank Investigator",
+      "Comment": "Transaction logs reviewed. Discrepancy confirmed."
+    }
+  ],
+  "SLA": {
+    "ResolutionDeadline": "2025-12-18T17:00:00+07:00",
+    "ElapsedHours": 4,
+    "RemainingHours": 68,
+    "Status": "OnTrack"
+  },
+  "Resolution": null,
+  "UpdatedAt": "2025-12-15T14:30:00+07:00"
+}
 ```
 
-## Performance & SLA
+## Matching Algorithm
 
-### Processing Time
+### Auto-Matching Rules
 
-| Operation | Target | Max |
-|-----------|--------|-----|
-| Transaction Inquiry | < 200ms | 500ms |
-| Report Generation (1 day) | < 5 min | 10 min |
-| Report Generation (1 month) | < 30 min | 1 hour |
-| Dispute Creation | < 1s | 2s |
-| Webhook Delivery | < 5s | 10s |
+```mermaid
+graph TB
+    Input[TPP Transaction vs Bank Transaction]
+    
+    Input --> Rule1{Exact Match?<br/>ID + Amount + Date}
+    Rule1 -->|Yes| Match1[Perfect Match<br/>100% Confidence]
+    Rule1 -->|No| Rule2{Fuzzy Match?<br/>ID + Amount<br/>Date ±2 min}
+    
+    Rule2 -->|Yes| Match2[Fuzzy Match<br/>95% Confidence]
+    Rule2 -->|No| Rule3{Amount Match?<br/>Same Amount<br/>Date ±1 hour}
+    
+    Rule3 -->|Yes| Match3[Possible Match<br/>70% Confidence<br/>Manual Review]
+    Rule3 -->|No| NoMatch[No Match<br/>0% Confidence<br/>Requires Investigation]
+    
+    Match1 --> Auto[Auto Reconciled]
+    Match2 --> Auto
+    Match3 --> Manual[Manual Review Queue]
+    NoMatch --> Manual
+    
+    style Match1 fill:#4caf50,color:#fff
+    style Match2 fill:#8bc34a
+    style Match3 fill:#ffc107
+    style NoMatch fill:#f44336,color:#fff
+```
 
-### SLA Commitments
+**Matching Criteria:**
 
-| Service | Availability | Response Time |
-|---------|--------------|---------------|
-| Inquiry APIs | 99.9% | < 500ms |
-| Report Generation | 99.5% | As per schedule |
-| Dispute Resolution | N/A | 5-7 business days |
-| Webhook Delivery | 99% | 3 retries |
+| Match Type | ID | Amount | Timestamp | Confidence | Action |
+|------------|-----|--------|-----------|------------|--------|
+| **Perfect** | Exact | Exact | ±10s | 100% | Auto reconcile |
+| **Fuzzy** | Exact | Exact | ±2min | 95% | Auto reconcile |
+| **Possible** | Exact | Exact | ±1hr | 70% | Manual review |
+| **Amount Only** | Different | Exact | ±1hr | 50% | Manual review |
+| **No Match** | - | - | - | 0% | Investigation |
 
-## Security & Compliance
+## Reporting
 
-### Access Control
+### Daily Reconciliation Report
+
+```mermaid
+gantt
+    title Daily Reconciliation Timeline
+    dateFormat HH:mm
+    axisFormat %H:%M
+    
+    section Data Collection
+    TPP Upload Files :done, upload, 00:00, 1h
+    Bank Extract Transactions :done, extract, 01:00, 1h
+    
+    section Processing
+    Auto Matching :active, match, 02:00, 2h
+    Manual Review :crit, review, 04:00, 3h
+    
+    section Reporting
+    Generate Reports :report, 07:00, 1h
+    Distribute Reports :distribute, 08:00, 30m
+    
+    section Follow-up
+    Investigate Mismatches :investigate, 08:30, 4h
+```
+
+**Report Types:**
+
+1. **Summary Report**: Tổng quan đối soát
+2. **Detailed Report**: Chi tiết từng giao dịch
+3. **Exception Report**: Chỉ giao dịch sai lệch
+4. **Trend Report**: Xu hướng theo thời gian
+5. **SLA Report**: Đánh giá thời gian xử lý
+
+### Report Distribution
 
 ```mermaid
 graph LR
-    subgraph "TPP Access"
-        TPP_Read[Read Own Transactions]
-        TPP_Dispute[Create Disputes]
-        TPP_Report[Request Reports]
-    end
+    Report[Generated Report]
     
-    subgraph "Bank Admin Access"
-        Admin_All[View All Transactions]
-        Admin_Dispute[Manage Disputes]
-        Admin_Report[Generate Reports]
-    end
+    Report --> Email[Email<br/>• TPP users<br/>• Bank admins]
+    Report --> Portal[TPP Portal<br/>Download section]
+    Report --> SFTP[SFTP Server<br/>Batch download]
+    Report --> API[API Endpoint<br/>Real-time access]
+    Report --> Archive[Archive Storage<br/>7 years retention]
     
-    subgraph "Auditor Access"
-        Audit_Read[Read-Only Access]
-        Audit_Export[Export Data]
-    end
+    style Report fill:#4caf50,color:#fff
 ```
 
-### Data Retention
+## SLA Management
 
-- **Transaction Data**: 5 years
-- **Reconciliation Reports**: 5 years
-- **Dispute Records**: 7 years
-- **Audit Logs**: 3 months (hot) + 1 year (cold)
+### Dispute Resolution SLA
+
+| Priority | Initial Response | Resolution Time | Escalation |
+|----------|------------------|-----------------|------------|
+| **Critical** | 1 hour | 24 hours | After 12 hours |
+| **High** | 4 hours | 3 days | After 2 days |
+| **Normal** | 8 hours | 5 days | After 4 days |
+| **Low** | 24 hours | 10 days | After 8 days |
+
+### SLA Monitoring
+
+```mermaid
+graph TB
+    Dispute[New Dispute]
+    
+    Dispute --> Assign[Auto Assign<br/>Set SLA Timer]
+    
+    Assign --> Monitor{Monitor SLA}
+    Monitor -->|80% Time Used| Warning[⚠️ Warning Alert<br/>Email to Handler]
+    Monitor -->|95% Time Used| Critical[🚨 Critical Alert<br/>Email to Manager]
+    Monitor -->|100% Time Used| Breach[❌ SLA Breach<br/>Auto Escalate]
+    
+    Warning --> Resolved{Resolved?}
+    Critical --> Resolved
+    Breach --> Resolved
+    
+    Resolved -->|Yes| Close[Close Dispute<br/>Calculate Metrics]
+    Resolved -->|No| Escalate[Escalate to<br/>Higher Level]
+    
+    style Breach fill:#f44336,color:#fff
+    style Critical fill:#ff9800
+    style Warning fill:#ffc107
+```
+
+## Data Retention
+
+```mermaid
+gantt
+    title Data Retention Timeline
+    dateFormat YYYY-MM-DD
+    axisFormat %b %Y
+    
+    section Hot Storage
+    Active Data :active, hot, 2025-01-01, 90d
+    
+    section Warm Storage
+    Recent History :warm, 2025-04-01, 365d
+    
+    section Cold Storage
+    Archive 1-3 years :cold1, 2026-01-01, 730d
+    Archive 3-7 years :cold2, 2028-01-01, 1460d
+    
+    section Deletion
+    Secure Deletion :crit, delete, 2033-01-01, 30d
+```
+
+**Retention Policy:**
+
+| Data Type | Hot | Warm | Cold | Total | Deletion |
+|-----------|-----|------|------|-------|----------|
+| **Transaction Records** | 90 days | 1 year | 7 years | 7 years | Secure erase |
+| **Reconciliation Reports** | 90 days | 1 year | 7 years | 7 years | Secure erase |
+| **Dispute Cases** | 90 days | 2 years | 7 years | 7 years | Secure erase |
+| **Evidence Files** | 90 days | 2 years | 7 years | 7 years | Secure erase |
+| **Audit Logs** | 90 days | 1 year | 7 years | 7 years | Permanent |
+
+## Security & Compliance
+
+### Audit Trail
+
+```json
+{
+  "EventId": "recon-evt-123456",
+  "EventType": "Reconciliation.Completed",
+  "Timestamp": "2025-12-15T10:12:35+07:00",
+  "Actor": {
+    "TPPId": "tpp-12345",
+    "UserId": "user-abc123",
+    "IP": "203.162.4.190"
+  },
+  "Action": {
+    "Type": "ReconciliationUpload",
+    "ReconciliationId": "recon-20251214-001",
+    "RecordCount": 1250,
+    "FileHash": "sha256:a1b2c3d4e5f6...",
+    "Status": "Completed"
+  },
+  "Result": {
+    "Matched": 1245,
+    "Unmatched": 5,
+    "VarianceAmount": "1500000 VND"
+  },
+  "Compliance": {
+    "DataRetention": "7 years",
+    "EncryptionUsed": "AES-256",
+    "AuditLogRetained": true
+  }
+}
+```
+
+## Performance Metrics
+
+**Target KPIs:**
+
+| Metric | Target | Current | Status |
+|--------|--------|---------|--------|
+| **Auto Match Rate** | ≥ 95% | 97.2% | ✅ |
+| **Report Generation** | < 15 min | 12 min | ✅ |
+| **Dispute Response** | < 4 hours | 3.5 hours | ✅ |
+| **Dispute Resolution** | < 3 days | 2.8 days | ✅ |
+| **SLA Compliance** | ≥ 98% | 98.5% | ✅ |
+| **API Availability** | ≥ 99.9% | 99.95% | ✅ |
 
 ## Tài Liệu Tham Khảo
-- Thông tư 64/2024/TT-NHNN - Điều 12 (Đối soát)
-- ISO 20022 - camt.053 (Bank to Customer Statement)
-- ISO 20022 - camt.054 (Bank to Customer Debit/Credit Notification)
-- PCI DSS - Dispute Management Requirements
+
+- **Thông tư 64/2024/TT-NHNN** - Open API Regulations
+- **ISO 20022** - Financial Message Standards
+- **PCI DSS 4.0** - Requirement 10 (Audit Logging)
+- **NIST SP 800-92** - Guide to Computer Security Log Management
+
+---
+
+**Phiên bản:** 1.0  
+**Ngày cập nhật:** 15/12/2025  
+**Trạng thái:** Production Ready
